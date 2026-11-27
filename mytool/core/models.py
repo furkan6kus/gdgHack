@@ -147,8 +147,20 @@ class Report(BaseModel):
     findings: list[Finding] = Field(default_factory=list)
     suggestions: list[Suggestion] = Field(default_factory=list)
     usage: TokenUsage = Field(default_factory=TokenUsage)
-    errors: list[str] = Field(default_factory=list)
-    skipped: list[str] = Field(default_factory=list)
 
     def visible_suggestions(self) -> list[Suggestion]:
         return [s for s in self.suggestions if s.presentable]
+
+
+class AnalysisRun(BaseModel):
+    reports: list[Report] = Field(default_factory=list)
+    errors: list[str] = Field(default_factory=list)
+    skipped: list[str] = Field(default_factory=list)
+    truncated: int = 0
+
+    @property
+    def usage(self) -> TokenUsage:
+        total = TokenUsage()
+        for report in self.reports:
+            total = total.add(report.usage)
+        return total

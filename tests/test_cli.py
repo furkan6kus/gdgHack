@@ -1,5 +1,7 @@
+import io
 import json
 import re
+import sys
 from pathlib import Path
 
 import pytest
@@ -10,7 +12,7 @@ from mytool.cli import main as cli_main
 from mytool.cli.main import app
 from mytool.core.analyzers.base import AnalyzerError
 from mytool.core.config import Config
-from mytool.core.models import Finding, Report
+from mytool.core.models import AnalysisRun, Finding
 from mytool.core.pipeline import analyze_static
 
 FIXTURE = Path(__file__).parent / "fixtures" / "sample.py"
@@ -60,8 +62,8 @@ def test_analyze_json() -> None:
     result = runner.invoke(app, ["analyze", str(FIXTURE), "--json"])
     assert result.exit_code == 0
     data = json.loads(result.output)
-    assert data[0]["findings"]
-    assert {f["rule"] for f in data[0]["findings"]} >= {"F401"}
+    assert data["reports"][0]["findings"]
+    assert {f["rule"] for f in data["reports"][0]["findings"]} >= {"F401"}
 
 
 def test_analyzer_error_exit_3(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -72,7 +74,7 @@ def test_analyzer_error_exit_3(monkeypatch: pytest.MonkeyPatch) -> None:
         def run(self, files: list[Path], timeout_s: float) -> list[Finding]:
             raise AnalyzerError("boom")
 
-    def fake(target: Path, cfg: Config) -> list[Report]:
+    def fake(target: Path, cfg: Config) -> AnalysisRun:
         return analyze_static(target, cfg, [Failing()])
 
     monkeypatch.setattr(cli_main, "analyze_static", fake)
@@ -86,3 +88,16 @@ def test_json_output(tmp_path: Path) -> None:
     result = runner.invoke(app, ["shrink", str(tmp_path), "--json"])
     assert result.exit_code == 0
     assert json.loads(result.output) == {"status": "not_implemented", "command": "shrink"}
+
+
+def test_truncation_exit_0() -> None:
+    result = runner.invoke(app, ["analyze", str(FIXTURE), "--max-findings", "1"])
+    assert result.exit_code == 0
+    assert "sınır nedeniyle gösterilmedi" in result.output
+
+
+def test_force_utf8_reconfigures(monkeypatch: pytest.MonkeyPatch) -> None:
+    buf = io.TextIOWrapper(io.BytesIO(), encoding="cp1252")
+    monkeypatch.setattr(sys, "stdout", buf)
+    cli_main._force_utf8()
+    assert buf.encoding == "utf-8"

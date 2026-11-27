@@ -8,7 +8,7 @@ from pathlib import Path
 from rich.console import Console
 from rich.markup import escape
 
-from mytool.core.models import Category, Finding, Report, Severity
+from mytool.core.models import AnalysisRun, Category, Finding, Report, Severity
 
 _LABELS: dict[Category, tuple[str, str]] = {
     Category.BUG: ("HATA", "red"),
@@ -39,10 +39,6 @@ def _render_report(console: Console, report: Report, cwd: Path) -> None:
     console.print(f"[bold]{name}[/] — {len(report.findings)} bulgu")
     for finding in report.findings:
         console.print(_finding_line(finding))
-    for error in report.errors:
-        console.print(f"  [red]{escape(error)}[/]")
-    for skip in report.skipped:
-        console.print(f"  [dim]atlandı: {escape(skip)}[/]")
 
 
 def _totals(reports: Sequence[Report]) -> str:
@@ -55,9 +51,17 @@ def _totals(reports: Sequence[Report]) -> str:
     )
 
 
-def render_reports(console: Console, reports: Sequence[Report], cwd: Path) -> None:
-    for report in reports:
+def render_reports(console: Console, run: AnalysisRun, cwd: Path) -> None:
+    for report in run.reports:
         _render_report(console, report, cwd)
-    if not any(r.findings for r in reports):
+    for error in run.errors:
+        console.print(f"[red]{escape(error)}[/]")
+    for skip in run.skipped:
+        console.print(f"[dim]atlandı: {escape(skip)}[/]")
+    if run.truncated:
+        console.print(
+            f"[yellow]{run.truncated} bulgu sınır nedeniyle gösterilmedi (--max-findings)[/]"
+        )
+    if not any(r.findings for r in run.reports):
         console.print("[green]Bulgu yok[/]")
-    console.print(_totals(reports))
+    console.print(_totals(run.reports))

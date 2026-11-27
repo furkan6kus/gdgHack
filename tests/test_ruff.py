@@ -55,6 +55,7 @@ def test_empty_output() -> None:
         ("S307", Severity.WARNING, Category.SECURITY),
         ("PERF401", Severity.INFO, Category.PERF),
         ("SIM102", Severity.INFO, Category.STYLE),
+        ("E722", Severity.WARNING, Category.BUG),
         ("E501", Severity.INFO, Category.STYLE),
     ],
 )

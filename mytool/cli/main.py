@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import io
 import json
+import sys
 from pathlib import Path
 from typing import Annotated
 
@@ -41,6 +43,12 @@ def _version_callback(value: bool) -> None:
         raise typer.Exit
 
 
+def _force_utf8() -> None:
+    for stream in (sys.stdout, sys.stderr):
+        if isinstance(stream, io.TextIOWrapper):
+            stream.reconfigure(encoding="utf-8", errors="replace")
+
+
 @app.callback()
 def _root(
     version: Annotated[
@@ -49,6 +57,7 @@ def _root(
     ] = False,
 ) -> None:
     """mytool command line."""
+    _force_utf8()
 
 
 def _prepare(
@@ -88,14 +97,12 @@ def analyze(
         err_console.print(f"[red]Error:[/] path not found: {path}")
         raise typer.Exit(2)
     config = load_config(model=model, max_findings=max_findings, verify=not no_verify)
-    reports = analyze_static(path, config)
+    run = analyze_static(path, config)
     if json_out:
-        typer.echo(
-            json.dumps([r.model_dump(mode="json") for r in reports], ensure_ascii=False, indent=2)
-        )
+        typer.echo(run.model_dump_json(indent=2))
     else:
-        render_reports(console, reports, Path.cwd())
-    if any(r.errors for r in reports):
+        render_reports(console, run, Path.cwd())
+    if run.errors:
         raise typer.Exit(3)
 
 

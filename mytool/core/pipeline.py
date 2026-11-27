@@ -10,7 +10,7 @@ from mytool.core.analyzers.base import Analyzer, AnalyzerError
 from mytool.core.analyzers.ruff import RuffAnalyzer
 from mytool.core.config import Config, is_denied
 from mytool.core.languages import plugin_for
-from mytool.core.models import CodeUnit, Finding, Report, Severity
+from mytool.core.models import AnalysisRun, CodeUnit, Finding, Report, Severity
 from mytool.core.parser import unit_for_line
 
 SKIP_DIRS = frozenset(
@@ -90,20 +90,9 @@ def _with_symbols(path: Path, findings: list[Finding]) -> list[Finding]:
     return result
 
 
-def _attach_notes(
-    reports: list[Report], errors: list[str], skipped: list[str], target: Path
-) -> None:
-    if not reports:
-        if errors or skipped:
-            reports.append(Report(file=target, errors=errors, skipped=skipped))
-        return
-    reports[0].errors.extend(errors)
-    reports[0].skipped.extend(skipped)
-
-
 def analyze_static(
     target: Path, cfg: Config, analyzers: Sequence[Analyzer] | None = None
-) -> list[Report]:
+) -> AnalysisRun:
     files, skipped = collect_files(target, cfg)
     findings, errors = _run_analyzers(
         analyzers if analyzers is not None else [RuffAnalyzer()],
@@ -111,9 +100,6 @@ def analyze_static(
         float(cfg.subprocess_timeout_s),
     )
     kept, hidden = _cap(findings, cfg.max_findings)
-    if hidden:
-        errors.append(f"{hidden} bulgu sınır nedeniyle gösterilmedi")
     groups = _group_by_file(kept, files)
     reports = [Report(file=p, findings=_with_symbols(p, groups.get(p, []))) for p in files]
-    _attach_notes(reports, errors, skipped, target)
-    return reports
+    return AnalysisRun(reports=reports, errors=errors, skipped=skipped, truncated=hidden)

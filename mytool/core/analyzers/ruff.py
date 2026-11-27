@@ -20,7 +20,7 @@ _BANDIT = re.compile(r"S\d")
 def severity_for(code: str | None) -> Severity:
     if code is None or code.startswith("E9") or code in _ERROR_CODES:
         return Severity.ERROR
-    if code.startswith(("F", "B")) or _BANDIT.match(code):
+    if code == "E722" or code.startswith(("F", "B")) or _BANDIT.match(code):
         return Severity.WARNING
     return Severity.INFO
 
@@ -30,7 +30,7 @@ def category_for(code: str | None) -> Category:
         return Category.SECURITY
     if code is not None and code.startswith("PERF"):
         return Category.PERF
-    if code is None or code.startswith(("E9", "F", "B")):
+    if code is None or code == "E722" or code.startswith(("E9", "F", "B")):
         return Category.BUG
     return Category.STYLE
 

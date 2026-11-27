@@ -65,7 +65,7 @@ def test_collect_single_file() -> None:
 
 def test_symbol_assignment() -> None:
     fake = FakeAnalyzer([_finding(FIXTURE, 16), _finding(FIXTURE, 1, rule="X2")])
-    (report,) = analyze_static(FIXTURE, Config(), [fake])
+    (report,) = analyze_static(FIXTURE, Config(), [fake]).reports
     by_rule = {f.rule: f.symbol for f in report.findings}
     assert by_rule == {"X1": "Greeter.hello.inner", "X2": None}
 
@@ -78,14 +78,16 @@ def test_truncation_orders_by_severity(tmp_path: Path) -> None:
         _finding(a, 1, Severity.ERROR, "E"),
         _finding(a, 1, Severity.WARNING, "W"),
     ]
-    (report,) = analyze_static(a, Config(max_findings=2), [FakeAnalyzer(findings)])
+    run = analyze_static(a, Config(max_findings=2), [FakeAnalyzer(findings)])
+    (report,) = run.reports
     assert {f.rule for f in report.findings} == {"E", "W"}
-    assert "1 bulgu sınır nedeniyle gösterilmedi" in report.errors
+    assert run.truncated == 1
+    assert run.errors == []
 
 
 def test_analyzer_error_captured_and_clean_files_reported(tmp_path: Path) -> None:
     a = tmp_path / "a.py"
     a.write_text("x = 1\n")
-    (report,) = analyze_static(a, Config(), [FailingAnalyzer()])
-    assert report.findings == []
-    assert report.errors == ["failing: boom"]
+    run = analyze_static(a, Config(), [FailingAnalyzer()])
+    assert run.reports[0].findings == []
+    assert run.errors == ["failing: boom"]

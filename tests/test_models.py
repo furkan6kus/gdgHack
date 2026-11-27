@@ -91,6 +91,5 @@ def test_report_json_round_trip() -> None:
         findings=[_finding()],
         suggestions=[_suggestion(VerifyStatus.PASSED)],
         usage=TokenUsage(input_tokens=3, output_tokens=4),
-        errors=["boom"],
     )
     assert Report.model_validate_json(report.model_dump_json()) == report
