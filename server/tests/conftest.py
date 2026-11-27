@@ -32,6 +32,14 @@ def parse_sse(client: TestClient, url: str) -> list[SseEvent]:
     return events
 
 
+@pytest.fixture(autouse=True)
+def _isolated_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep tests off the real history file and away from Telegram."""
+    monkeypatch.setenv("MYTOOL_HISTORY_FILE", str(tmp_path / "history.json"))
+    monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
+    monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
+
+
 @pytest.fixture
 def project(tmp_path: Path) -> Path:
     root = tmp_path / "project"

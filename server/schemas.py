@@ -6,6 +6,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from server.contracts import LLMChoice
+
 
 class ErrorPayload(BaseModel):
     """User-facing error. ``message`` is Turkish and never contains a traceback."""
@@ -17,6 +19,7 @@ class ErrorPayload(BaseModel):
 class AnalyzeRequest(BaseModel):
     path: str = Field(min_length=1)
     verify: bool = True
+    llm: LLMChoice | None = None
 
 
 class AnalyzeStarted(BaseModel):
@@ -32,6 +35,7 @@ class ApplyResponse(BaseModel):
     applied_ids: list[str]
     changed_files: list[str]
     backup_path: str
+    history_id: str | None = None
 
 
 class BrowseEntry(BaseModel):
@@ -56,3 +60,31 @@ class HealthResponse(BaseModel):
     status: str
     adapter: str
     api_key_configured: bool
+    telegram_configured: bool = False
+
+
+class PickRequest(BaseModel):
+    kind: Literal["files", "folder"] = "files"
+    initial_dir: str | None = None
+
+
+class PickResponse(BaseModel):
+    paths: list[str]
+
+
+class CloneRequest(BaseModel):
+    url: str = Field(min_length=1, max_length=300)
+
+
+class ModelInfo(BaseModel):
+    id: str
+    name: str
+    note: str
+    input_per_mtok: float
+    output_per_mtok: float
+
+
+class ModelsResponse(BaseModel):
+    models: list[ModelInfo]
+    default_model: str
+    default_effort: str

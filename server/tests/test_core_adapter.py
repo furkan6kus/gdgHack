@@ -83,14 +83,31 @@ def test_findings_and_passed_suggestion(tmp_path: Path) -> None:
     assert sug.verification.status == "passed"
     assert result.token_usage.input_tokens == 7
     assert {e.stage for e in events} >= {"parsing", "static_analysis", "llm", "verify", "done"}
+    assert result.sources == {"calc.py": "import os\n\n\ndef add(a, b):\n    return a + b\n"}
 
 
-def test_syntax_only_verification_is_not_passed(tmp_path: Path) -> None:
+def test_syntax_only_verification_is_applicable_but_untested(tmp_path: Path) -> None:
     root = _project(tmp_path / "p", with_tests=False)
     result, _ = _analyze(_adapter(), root)
     (sug,) = result.suggestions
-    assert sug.verification.status == "skipped"
-    assert "sözdizimi" in sug.verification.detail
+    assert sug.verification.status == "passed"
+    assert sug.verification.tested is False
+    assert "Testle doğrulanmadı" in sug.verification.detail
+
+
+def test_tested_pass_is_marked_tested(tmp_path: Path) -> None:
+    root = _project(tmp_path / "p")
+    result, _ = _analyze(_adapter(), root)
+    assert result.suggestions[0].verification.tested is True
+
+
+def test_untested_suggestion_can_be_applied(tmp_path: Path) -> None:
+    root = _project(tmp_path / "p", with_tests=False)
+    adapter = _adapter()
+    result, _ = _analyze(adapter, root)
+    outcome = adapter.apply(root, result.suggestions)
+    assert outcome.changed_files == ["calc.py"]
+    assert not (root / "calc.py").read_text().startswith("import os")
 
 
 def test_no_verify_marks_skipped(tmp_path: Path) -> None:
@@ -163,3 +180,22 @@ def test_verify_flag_reaches_core_config(tmp_path: Path) -> None:
     adapter = CoreAdapter(llm_factory=factory)
     _analyze(adapter, _project(tmp_path / "p"), verify=False)
     assert seen[0].verify is False
+
+
+def test_llm_choice_reaches_core_config(tmp_path: Path) -> None:
+    from server.contracts import LLMChoice
+
+    seen: list[Config] = []
+
+    def factory(cfg: Config) -> FakeLLM:
+        seen.append(cfg)
+        return FakeLLM()
+
+    CoreAdapter(llm_factory=factory).analyze(
+        _project(tmp_path / "p"),
+        verify=False,
+        on_progress=lambda e: None,
+        cancel=threading.Event(),
+        llm=LLMChoice(model="claude-opus-5-5", effort="high"),
+    )
+    assert (seen[0].model, seen[0].effort) == ("claude-opus-5-5", "high")

@@ -10,29 +10,29 @@ export const STAGE_ORDER: Exclude<Stage, 'error'>[] = [
 ];
 
 export const STAGE_LABELS: Record<Stage, string> = {
-  parsing: 'Dosyalar ayrıştırılıyor',
-  static_analysis: 'Statik analiz (ruff)',
-  llm: 'LLM açıklama ve yama önerileri',
-  verify: 'Yamalar doğrulanıyor',
+  parsing: 'Dosyalar okunuyor',
+  static_analysis: 'Statik analiz',
+  llm: 'Düzeltme önerileri hazırlanıyor',
+  verify: 'Öneriler deneniyor',
   done: 'Tamamlandı',
   error: 'Hata',
 };
 
 // Filter chips shown for analyze. shrink/translate belong to other commands.
 export const CATEGORY_CHIPS: { value: Category; label: string }[] = [
-  { value: 'bug', label: 'HATA' },
-  { value: 'security', label: 'GÜVENLİK' },
-  { value: 'perf', label: 'PERF' },
-  { value: 'style', label: 'STİL' },
+  { value: 'bug', label: 'Hata' },
+  { value: 'security', label: 'Güvenlik' },
+  { value: 'perf', label: 'Performans' },
+  { value: 'style', label: 'Stil' },
 ];
 
 export const CATEGORY_LABELS: Record<Category, string> = {
-  bug: 'HATA',
-  security: 'GÜVENLİK',
-  perf: 'PERF',
-  style: 'STİL',
-  shrink: 'KÜÇÜLTME',
-  translate: 'ÇEVİRİ',
+  bug: 'Hata',
+  security: 'Güvenlik',
+  perf: 'Performans',
+  style: 'Stil',
+  shrink: 'Küçültme',
+  translate: 'Çeviri',
 };
 
 // "Hata" is already the bug category, so error severity is labelled "Ciddi".

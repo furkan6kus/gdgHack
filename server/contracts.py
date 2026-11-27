@@ -56,6 +56,9 @@ class VerificationResult(BaseModel):
     status: VerificationStatus
     detail: str
     duration_ms: int
+    # False when only syntax + ruff were checked (no tests ran). Still applicable from the UI,
+    # which warns about it before applying.
+    tested: bool = True
 
 
 class Suggestion(BaseModel):
@@ -89,6 +92,13 @@ class TokenUsage(BaseModel):
     output_tokens: int = 0
 
 
+class LLMChoice(BaseModel):
+    """Model and effort the user picked in the UI for suggestions and chat."""
+
+    model: str
+    effort: Literal["low", "medium", "high"] = "medium"
+
+
 class AnalyzeResult(BaseModel):
     """UI-level result of an ``analyze`` run."""
 
@@ -99,6 +109,8 @@ class AnalyzeResult(BaseModel):
     token_usage: TokenUsage = Field(default_factory=TokenUsage)
     estimated_cost_usd: float | None = None
     warnings: list[str] = Field(default_factory=list)
+    # Text of every file that has findings, keyed like Finding.file, for the code pane.
+    sources: dict[str, str] = Field(default_factory=dict)
 
 
 class ProgressEvent(BaseModel):

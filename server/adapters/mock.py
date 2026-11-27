@@ -19,6 +19,7 @@ from server.adapters.base import ApplyOutcome, ProgressCallback
 from server.contracts import (
     AnalyzeResult,
     Finding,
+    LLMChoice,
     ProgressEvent,
     Stage,
     Suggestion,
@@ -56,6 +57,7 @@ class MockAdapter:
         verify: bool,
         on_progress: ProgressCallback,
         cancel: threading.Event,
+        llm: LLMChoice | None = None,
     ) -> AnalyzeResult:
         if not self.api_key_configured():
             raise AdapterError(API_KEY_MISSING, "ANTHROPIC_API_KEY tanımlı değil.")

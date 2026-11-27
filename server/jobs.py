@@ -18,8 +18,9 @@ from pathlib import Path
 from typing import Literal
 
 from server.adapters.base import Adapter
-from server.contracts import AnalyzeResult, ProgressEvent
+from server.contracts import AnalyzeResult, LLMChoice, ProgressEvent
 from server.errors import CANCELLED, INTERNAL, INTERNAL_MESSAGE, AdapterError
+from server.notify import TelegramNotifier, error_message, result_message
 from server.schemas import ErrorPayload
 
 log = logging.getLogger(__name__)
@@ -85,8 +86,9 @@ def only_visible_suggestions(result: AnalyzeResult) -> AnalyzeResult:
 
 
 class JobStore:
-    def __init__(self, adapter: Adapter) -> None:
+    def __init__(self, adapter: Adapter, notifier: TelegramNotifier | None = None) -> None:
         self.adapter = adapter
+        self.notifier = notifier or TelegramNotifier()
         self._jobs: OrderedDict[str, Job] = OrderedDict()
         self._tasks: set[asyncio.Task[None]] = set()
 
@@ -97,10 +99,10 @@ class JobStore:
         for job in self._jobs.values():
             job.cancel.set()
 
-    def start(self, root: Path, *, verify: bool) -> Job:
+    def start(self, root: Path, *, verify: bool, llm: LLMChoice | None = None) -> Job:
         job = Job(id=uuid.uuid4().hex, root=root)
         self._remember(job)
-        task = asyncio.create_task(self._run(job, verify))
+        task = asyncio.create_task(self._run(job, verify, llm))
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)
         return job
@@ -111,7 +113,7 @@ class JobStore:
             _, old = self._jobs.popitem(last=False)
             old.cancel.set()
 
-    async def _run(self, job: Job, verify: bool) -> None:
+    async def _run(self, job: Job, verify: bool, llm: LLMChoice | None) -> None:
         loop = asyncio.get_running_loop()
 
         def on_progress(event: ProgressEvent) -> None:
@@ -125,6 +127,7 @@ class JobStore:
                 verify=verify,
                 on_progress=on_progress,
                 cancel=job.cancel,
+                llm=llm,
             )
         except AdapterError as err:
             self._finish_with_error(job, err.payload())
@@ -136,7 +139,25 @@ class JobStore:
             job.result = only_visible_suggestions(raw)
             job.status = "done"
             job.publish(SseMessage("result", job.result.model_dump_json()))
+            self._notify(result_message(job.root, job.result))
 
     def _finish_with_error(self, job: Job, payload: ErrorPayload) -> None:
         job.status = "cancelled" if payload.code == CANCELLED else "error"
         job.publish(SseMessage("error", payload.model_dump_json()))
+        if job.status == "error":
+            self._notify(error_message(job.root, payload))
+
+    def notify(self, text: str) -> None:
+        """Public: other routes (apply, chat) also report to Telegram."""
+        self._notify(text)
+
+    def _notify(self, text: str) -> None:
+        """Send in the background; the analysis result never waits for Telegram."""
+        if not self.notifier.configured:
+            return
+        task = asyncio.create_task(self._send(text))
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
+
+    async def _send(self, text: str) -> None:
+        await self.notifier.send(text)

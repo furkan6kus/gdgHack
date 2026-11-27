@@ -11,6 +11,7 @@ from this table keeps ruff's English text.
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from functools import cache
 
 _XML = (
@@ -1249,11 +1250,196 @@ def _fill(turkish: str, values: dict[str, str]) -> str:
     return _PLACEHOLDER.sub(lambda m: values.get(m.group(1), "…"), turkish)
 
 
+# --------------------------------------------------------------------------- syntax errors
+# Ruff reports parse errors with the code `invalid-syntax` (older versions: no code).
+# Their texts come from the parser, so they are matched as patterns, not by rule.
+
+SYNTAX_RULES = frozenset({"syntax-error", "invalid-syntax"})
+
+# Words that appear inside "Expected X, found Y" style messages.
+_TOKENS: dict[str, str] = {
+    "newline": "satır sonu",
+    "end of file": "dosya sonu",
+    "dedent": "girinti azalması",
+    "indent": "girinti",
+    "identifier": "isim",
+    "name": "isim",
+    "string": "metin",
+    "int": "sayı",
+    "float": "sayı",
+    "an expression": "bir ifade",
+    "a statement": "bir deyim",
+    "an identifier": "bir isim",
+    "a parameter or the end of the parameter list": "bir parametre ya da parametre listesinin sonu",
+    "an expression or a ')'": "bir ifade ya da `)`",
+    "an expression or a ']'": "bir ifade ya da `]`",
+    "an expression or a '}'": "bir ifade ya da `}`",
+    "function definition": "fonksiyon tanımı",
+    "class definition": "sınıf tanımı",
+}
+
+_STATEMENT = re.compile(r"`(\w+)` (statement|clause)")
+_OR_LIST = re.compile(r"\s+or\s+")
+
+
+def _token(text: str) -> str:
+    text = text.strip()
+    if text in _TOKENS:
+        return _TOKENS[text]
+    statement = _STATEMENT.fullmatch(text)
+    if statement:
+        return (
+            f"`{statement.group(1)}` {'deyimi' if statement.group(2) == 'statement' else 'bloğu'}"
+        )
+    if " or " in text:
+        return " ya da ".join(_token(part) for part in _OR_LIST.split(text))
+    return text
+
+
+_SYNTAX: tuple[tuple[re.Pattern[str], Callable[[re.Match[str]], str]], ...] = tuple(
+    (re.compile(pattern + r"\Z", re.DOTALL), build)
+    for pattern, build in (
+        (r"Unexpected indentation", lambda m: "Beklenmeyen girinti: bu satır fazladan içeride"),
+        (
+            r"unindent does not match any outer indentation level",
+            lambda m: "Girinti hiçbir üst satırın girintisiyle eşleşmiyor",
+        ),
+        (
+            r"Expected an indented block after (?P<what>.+)",
+            lambda m: (
+                f"{_token(m['what'])} sonrasında girintili (içeriden başlayan) blok bekleniyordu"
+            ),
+        ),
+        (
+            r"Expected an indented block",
+            lambda m: "Girintili (içeriden başlayan) blok bekleniyordu",
+        ),
+        (
+            r"Expected `except` or `finally` after `try` block",
+            lambda m: "`try` bloğundan sonra `except` ya da `finally` bekleniyordu",
+        ),
+        (
+            r"Expected `def`, `with` or `for` to follow `async`, found (?P<found>.+)",
+            lambda m: (
+                f"`async` sonrasında `def`, `with` ya da `for` bekleniyordu, "
+                f"{_token(m['found'])} bulundu"
+            ),
+        ),
+        (
+            r"Expected one or more symbol names after import",
+            lambda m: "`import` sonrasında en az bir isim bekleniyordu",
+        ),
+        (
+            r"Expected one or more keyword parameter after `\*` separator",
+            lambda m: "`*` ayıracından sonra en az bir adlı parametre bekleniyordu",
+        ),
+        (
+            r"Expected dedent, found end of file",
+            lambda m: "Girintili blok kapanmadan dosya bitti",
+        ),
+        (
+            r"Expected (?P<want>.+?), found (?P<found>.+)",
+            lambda m: f"{_token(m['want'])} bekleniyordu, {_token(m['found'])} bulundu",
+        ),
+        (r"Expected (?P<want>.+)", lambda m: f"{_token(m['want'])} bekleniyordu"),
+        (r"Got unexpected token (?P<tok>.+)", lambda m: f"Beklenmeyen karakter: {m['tok']}"),
+        (r"unexpected EOF while parsing", lambda m: "Kod tamamlanmadan dosya bitti"),
+        (
+            r"Simple statements must be separated by newlines or semicolons",
+            lambda m: "Aynı satırdaki deyimler satır sonu ya da noktalı virgülle ayrılmalı",
+        ),
+        (r"missing closing quote in string literal", lambda m: "Metnin kapanış tırnağı eksik"),
+        (
+            r"unterminated triple-quoted string literal",
+            lambda m: "Üç tırnaklı metnin kapanış tırnakları eksik",
+        ),
+        (r"Invalid assignment target", lambda m: "Bu ifadeye değer atanamaz"),
+        (r"Invalid augmented assignment target", lambda m: "Bu ifadeye `+=` gibi atama yapılamaz"),
+        (r"Invalid delete target", lambda m: "Bu ifade `del` ile silinemez"),
+        (
+            r"Invalid annotated assignment target",
+            lambda m: "Bu ifadeye tür açıklamalı atama yapılamaz",
+        ),
+        (r"Invalid decimal integer literal", lambda m: "Geçersiz tam sayı yazımı"),
+        (r"Invalid hexadecimal integer literal", lambda m: "Geçersiz onaltılık sayı yazımı"),
+        (r"Invalid octal integer literal", lambda m: "Geçersiz sekizlik sayı yazımı"),
+        (r"Invalid binary integer literal", lambda m: "Geçersiz ikilik sayı yazımı"),
+        (
+            r"Duplicate keyword argument (?P<name>.+)",
+            lambda m: f"Aynı adlı argüman iki kez verilmiş: {m['name']}",
+        ),
+        (
+            r"Duplicate parameter (?P<name>.+)",
+            lambda m: f"Aynı adlı parametre iki kez tanımlanmış: {m['name']}",
+        ),
+        (
+            r"Positional argument cannot follow keyword argument",
+            lambda m: "Sıralı argüman, adlı argümandan sonra gelemez",
+        ),
+        (
+            r"Positional argument cannot follow keyword argument unpacking",
+            lambda m: "Sıralı argüman, `**` ile açılan argümandan sonra gelemez",
+        ),
+        (
+            r"Parameter without a default cannot follow a parameter with a default",
+            lambda m: (
+                "Varsayılan değeri olmayan parametre, varsayılanı olan parametreden sonra gelemez"
+            ),
+        ),
+        (
+            r"Parameter cannot follow var-keyword parameter",
+            lambda m: "`**kwargs` parametresinden sonra başka parametre gelemez",
+        ),
+        (
+            r"Starred expression cannot be used here",
+            lambda m: "Yıldızlı ifade (`*`) burada kullanılamaz",
+        ),
+        (
+            r"Exception missing in `raise` statement with cause",
+            lambda m: "`raise ... from` deyiminde fırlatılacak hata eksik",
+        ),
+        (
+            r"nonlocal declaration not allowed at module level",
+            lambda m: "`nonlocal` modül düzeyinde kullanılamaz",
+        ),
+        (
+            r"f-string: (?P<rest>.+)",
+            lambda m: f"f-string hatası: {_FSTRING.get(m['rest'], m['rest'])}",
+        ),
+    )
+)
+
+_FSTRING: dict[str, str] = {
+    "invalid conversion character": "geçersiz dönüştürme karakteri (yalnız !r, !s, !a)",
+    "expecting '}'": "`}` bekleniyordu",
+    "single '}' is not allowed": "tek başına `}` kullanılamaz",
+    "valid expression required before '}'": "`}` öncesinde geçerli bir ifade gerekli",
+    "unterminated string": "metin kapanmamış",
+}
+
+
+def _capitalize(text: str) -> str:
+    """Upper-case the first letter the Turkish way (i -> İ)."""
+    if not text or not text[0].isalpha():
+        return text
+    first = "İ" if text[0] == "i" else text[0].upper()
+    return first + text[1:]
+
+
+def translate_syntax(message: str) -> str:
+    """Turkish text for a parse error; an unknown wording keeps ruff's text after a Turkish lead."""
+    detail = message.removeprefix(_SYNTAX_PREFIX)
+    for pattern, build in _SYNTAX:
+        match = pattern.match(detail)
+        if match is not None:
+            return _capitalize(build(match))
+    return f"Sözdizimi hatası, Python bu satırı okuyamıyor (ruff: {detail})"
+
+
 def translate(rule: str | None, message: str) -> str:
     """Turkish text for a ruff finding; unknown rules keep ruff's message."""
-    if rule is None or rule == "syntax-error":
-        detail = message.removeprefix(_SYNTAX_PREFIX)
-        return f"Sözdizimi hatası: {detail}"
+    if rule is None or rule in SYNTAX_RULES:
+        return translate_syntax(message)
     variants = MESSAGES.get(rule)
     if not variants:
         return message

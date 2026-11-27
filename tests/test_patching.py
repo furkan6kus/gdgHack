@@ -92,3 +92,27 @@ def test_apply_multiple_prefers_line() -> None:
 
 def test_patch_error_is_value_error() -> None:
     assert issubclass(PatchError, ValueError)
+
+
+def test_tab_retyped_as_spaces_still_matches() -> None:
+    source = "def f(x):\n    for i in x:\n\ttotal += i\n    return total\n"
+    fix = _fix("    for i in x:\n        total += i\n", "    for i in x:\n        total += i\n")
+    patch = build_patch(source, FILE, 10, fix)
+    assert patch is not None
+    assert patch.original == "    for i in x:\n\ttotal += i\n"  # verbatim from the file
+    assert (patch.lines.start, patch.lines.end) == (11, 12)
+    assert (
+        apply_patch(source, patch)
+        == "def f(x):\n    for i in x:\n        total += i\n    return total\n"
+    )
+
+
+def test_loose_match_must_be_unique() -> None:
+    source = "a = 1\n  a = 1\n"
+    with pytest.raises(PatchError, match="bulunamadı"):
+        build_patch(source, FILE, 1, _fix("\ta = 1", "b = 1"))
+
+
+def test_loose_match_needs_same_text() -> None:
+    with pytest.raises(PatchError, match="bulunamadı"):
+        build_patch(SOURCE, FILE, 1, _fix("\ty = z", "y = x"))

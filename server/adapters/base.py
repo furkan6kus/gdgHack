@@ -14,7 +14,7 @@ from typing import Protocol
 
 from pydantic import BaseModel
 
-from server.contracts import AnalyzeResult, ProgressEvent, Suggestion
+from server.contracts import AnalyzeResult, LLMChoice, ProgressEvent, Suggestion
 
 ProgressCallback = Callable[[ProgressEvent], None]
 
@@ -39,6 +39,7 @@ class Adapter(Protocol):
         verify: bool,
         on_progress: ProgressCallback,
         cancel: threading.Event,
+        llm: LLMChoice | None = None,
     ) -> AnalyzeResult:
         """Run the analysis. Raise ``AdapterError`` for expected failures."""
         ...

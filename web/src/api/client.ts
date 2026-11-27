@@ -5,9 +5,15 @@ import {
   type AnalyzeResult,
   type AnalyzeStarted,
   type ApplyResponse,
+  type ChatEdit,
+  type ChatMessage,
+  type ChatResponse,
   type BrowseResponse,
   type ErrorPayload,
   type HealthResponse,
+  type HistoryEntry,
+  type LLMChoice,
+  type ModelsResponse,
   type Place,
   type ProgressEvent,
 } from './types';
@@ -74,8 +80,8 @@ export function toErrorPayload(err: unknown): ErrorPayload {
 export const api = {
   health: () => request<HealthResponse>('/api/health'),
 
-  startAnalyze: (path: string, verify: boolean) =>
-    postJson<AnalyzeStarted>('/api/analyze', { path, verify }),
+  startAnalyze: (path: string, verify: boolean, llm?: LLMChoice) =>
+    postJson<AnalyzeStarted>('/api/analyze', { path, verify, llm }),
 
   cancelAnalyze: async (jobId: string): Promise<void> => {
     await fetch(`${API_BASE}/api/analyze/${encodeURIComponent(jobId)}/cancel`, {
@@ -97,6 +103,33 @@ export const api = {
 
   apply: (jobId: string, suggestionIds: string[]) =>
     postJson<ApplyResponse>('/api/apply', { job_id: jobId, suggestion_ids: suggestionIds }),
+
+  history: () => request<HistoryEntry[]>('/api/history'),
+
+  undo: (entryId: string) =>
+    postJson<HistoryEntry>(`/api/history/${encodeURIComponent(entryId)}/undo`, {}),
+
+  notifyTest: () => postJson<{ sent: boolean }>('/api/notify/test', {}),
+
+  chat: (path: string, file: string, messages: ChatMessage[], llm?: LLMChoice) =>
+    postJson<ChatResponse>('/api/chat', { path, file, messages, llm }),
+
+  models: () => request<ModelsResponse>('/api/models'),
+
+  /** Opens the operating system's file dialog on this computer. */
+  pick: (kind: 'files' | 'folder', initialDir?: string) =>
+    postJson<{ paths: string[] }>('/api/pick', { kind, initial_dir: initialDir ?? null }),
+
+  cloneRepo: (url: string) => postJson<{ paths: string[] }>('/api/clone', { url }),
+
+  applyChatEdit: (path: string, edit: ChatEdit) =>
+    postJson<ApplyResponse>('/api/chat/apply', {
+      path,
+      file: edit.file,
+      original: edit.original,
+      replacement: edit.replacement,
+      explanation: edit.explanation,
+    }),
 };
 
 export interface AnalysisHandlers {

@@ -1,38 +1,66 @@
 import { AnimatePresence, motion } from 'framer-motion';
-import { useMemo, useState } from 'react';
+import { lazy, Suspense, useMemo, useState } from 'react';
 import { api, toErrorPayload } from '../../api/client';
-import type { AnalyzeResult, ApplyResponse, ErrorPayload, Suggestion } from '../../api/types';
-import { LogoMark } from '../../components/Logo';
+import type { AnalyzeResult, ApplyResponse, ErrorPayload, LLMChoice, Suggestion } from '../../api/types';
+import type { LineMark } from '../../components/CodeView';
 import { StateMessage } from '../../components/StateMessage';
-import { Button, CARD, Callout, StatBadge } from '../../components/ui';
+import { Button, CARD, Callout, Pill, Spinner } from '../../components/ui';
 import { useHotkeys } from '../../hooks/useHotkeys';
-import { formatNumber } from '../../lib/labels';
-import { ApplyBar, ConfirmApplyModal } from './ApplyControls';
-import { FindingDetail } from './FindingDetail';
-import { FindingList } from './FindingList';
-import {
-  buildRows,
-  countByCategory,
-  isApplicable,
-  orphanRows,
-  suggestionRows,
-  toggleIn,
-  type CategoryFilter,
-} from './model';
+import { ConfirmApplyModal } from './ApplyControls';
+import { ChatPanel, type ChatEntry } from './ChatPanel';
+import { FindingCards } from './FindingCards';
+import { buildRows, isApplicable, languageFor, orphanRows, suggestionRows, toggleIn } from './model';
+
+const CodeView = lazy(() => import('../../components/CodeView'));
 
 interface ResultsScreenProps {
   jobId: string;
   result: AnalyzeResult;
   onNewAnalysis: () => void;
+  /** Only the visible tab reacts to keyboard shortcuts. */
+  active?: boolean;
+  /** Called after a successful apply (the app re-analyzes the same path). */
+  onApplied?: (response: ApplyResponse) => void;
+  /** One-line message shown above the results, e.g. what the last apply did. */
+  notice?: string;
+  /** Run the same path again (the "Yeniden analiz et" button). */
+  onReanalyze?: () => void;
+  /** The tab's analyzed path, used by the chat. */
+  path?: string;
+  chat?: ChatEntry[];
+  onChat?: (entries: ChatEntry[]) => void;
+  onChatBusy?: (busy: boolean) => void;
+  onChatApplied?: (response: ApplyResponse, explanation: string) => void;
+  llm?: LLMChoice | null;
+  onCost?: (cost: number | null | undefined) => void;
 }
 
-export function ResultsScreen({ jobId, result, onNewAnalysis }: ResultsScreenProps) {
+export function ResultsScreen({
+  jobId,
+  result,
+  onNewAnalysis,
+  active = true,
+  onApplied,
+  notice,
+  onReanalyze,
+  path,
+  chat = [],
+  onChat,
+  onChatBusy,
+  onChatApplied,
+  llm,
+  onCost,
+}: ResultsScreenProps) {
+  const [panel, setPanel] = useState<'findings' | 'chat'>(chat.length > 0 ? 'chat' : 'findings');
   const allRows = useMemo(() => buildRows(result), [result]);
-  const [category, setCategory] = useState<CategoryFilter>('all');
-  const [showOrphans, setShowOrphans] = useState(false);
-  const [selectedId, setSelectedId] = useState<string | null>(
-    () => suggestionRows(allRows, 'all')[0]?.finding.id ?? null,
-  );
+  // Ready fixes first, then findings that need a manual fix.
+  const rows = useMemo(() => [...suggestionRows(allRows, 'all'), ...orphanRows(allRows)], [allRows]);
+  const labels = useMemo(() => {
+    const map = new Map<string, string>();
+    suggestionRows(allRows, 'all').forEach((row, i) => map.set(row.finding.id, `Öneri ${i + 1}`));
+    return map;
+  }, [allRows]);
+  const [selectedId, setSelectedId] = useState<string | null>(() => rows[0]?.finding.id ?? null);
   const [checked, setChecked] = useState<Set<string>>(new Set());
   const [applied, setApplied] = useState<Set<string>>(new Set());
   const [pending, setPending] = useState<Suggestion[]>([]);
@@ -40,35 +68,36 @@ export function ResultsScreen({ jobId, result, onNewAnalysis }: ResultsScreenPro
   const [applyError, setApplyError] = useState<ErrorPayload | null>(null);
   const [lastApply, setLastApply] = useState<ApplyResponse | null>(null);
 
-  const rows = useMemo(() => suggestionRows(allRows, category), [allRows, category]);
-  const orphans = useMemo(() => orphanRows(allRows), [allRows]);
-  const counts = useMemo(() => countByCategory(allRows), [allRows]);
-  // Navigation order matches what is visible: suggestion rows, then expanded orphans.
-  const visible = useMemo(
-    () => (showOrphans && category === 'all' ? [...rows, ...orphans] : rows),
-    [rows, orphans, showOrphans, category],
-  );
-  const selectedRow = visible.find((r) => r.finding.id === selectedId) ?? null;
+  const selectedRow = rows.find((r) => r.finding.id === selectedId) ?? rows[0] ?? null;
+  const file = selectedRow?.finding.file ?? result.files[0]?.path ?? '';
+  const chatPanel =
+    path && onChat && file ? (
+      <ChatPanel
+        path={path}
+        file={file}
+        entries={chat}
+        onEntries={onChat}
+        onBusy={(busy) => onChatBusy?.(busy)}
+        onApplied={(response, explanation) => onChatApplied?.(response, explanation)}
+        llm={llm ?? undefined}
+        onCost={(cost) => onCost?.(cost)}
+      />
+    ) : null;
   const applicable = useMemo(
     () => result.suggestions.filter((s) => isApplicable(s, applied)),
     [result.suggestions, applied],
   );
+  const ready = result.suggestions.filter((s) => s.verification.status === 'passed').length;
 
   const toggleChecked = (id: string) => {
     if (applicable.some((s) => s.id === id)) setChecked((prev) => toggleIn(prev, id));
   };
 
   const move = (delta: number) => {
-    if (visible.length === 0) return;
-    const index = visible.findIndex((r) => r.finding.id === selectedId);
-    const next = Math.min(visible.length - 1, Math.max(0, index + delta));
-    setSelectedId(visible[index === -1 ? 0 : next].finding.id);
-  };
-
-  const changeCategory = (next: CategoryFilter) => {
-    setCategory(next);
-    const first = suggestionRows(allRows, next)[0];
-    if (first) setSelectedId(first.finding.id);
+    if (rows.length === 0) return;
+    const index = rows.findIndex((r) => r.finding.id === selectedRow?.finding.id);
+    const next = Math.min(rows.length - 1, Math.max(0, index + delta));
+    setSelectedId(rows[index === -1 ? 0 : next].finding.id);
   };
 
   useHotkeys(
@@ -79,7 +108,7 @@ export function ResultsScreen({ jobId, result, onNewAnalysis }: ResultsScreenPro
       ArrowUp: () => move(-1),
       ' ': () => selectedRow?.suggestion && toggleChecked(selectedRow.suggestion.id),
     },
-    pending.length === 0,
+    active && pending.length === 0,
   );
 
   const confirmApply = async () => {
@@ -91,6 +120,7 @@ export function ResultsScreen({ jobId, result, onNewAnalysis }: ResultsScreenPro
       setChecked((prev) => new Set([...prev].filter((id) => !response.applied_ids.includes(id))));
       setLastApply(response);
       setPending([]);
+      onApplied?.(response);
     } catch (err) {
       setApplyError(toErrorPayload(err));
     } finally {
@@ -103,64 +133,126 @@ export function ResultsScreen({ jobId, result, onNewAnalysis }: ResultsScreenPro
     setPending(suggestions);
   };
 
-  return (
-    <div className="flex h-full flex-col">
-      <ResultsHeader result={result} onNewAnalysis={onNewAnalysis} />
-      {(result.warnings?.length ?? 0) > 0 && (
-        <div className="shrink-0 px-4 pt-3 sm:px-6">
-          <Callout tone="warn">
-            <ul className="space-y-1 text-sm">
-              {result.warnings?.map((w, i) => <li key={i}>{w}</li>)}
-            </ul>
-          </Callout>
-        </div>
+  const marks = useMemo<LineMark[]>(
+    () =>
+      rows
+        .filter((r) => r.finding.file === file)
+        .map((r) => ({
+          line: r.finding.line_start,
+          kind: r.suggestion ? 'suggestion' : 'warn',
+          label: labels.get(r.finding.id) ?? 'Bulgu',
+        })),
+    [rows, file, labels],
+  );
+
+  const messages = (
+    <>
+      {notice && (
+        <Callout tone="ok" className="!py-3 text-sm">
+          {notice}
+        </Callout>
       )}
-      {result.findings.length === 0 ? (
+      {(result.warnings?.length ?? 0) > 0 && (
+        <Callout tone="warn">
+          <ul className="space-y-1 text-sm">
+            {result.warnings?.map((w, i) => <li key={i}>{w}</li>)}
+          </ul>
+        </Callout>
+      )}
+    </>
+  );
+
+  if (result.findings.length === 0) {
+    return (
+      <div className="flex h-full flex-col gap-3 p-4 sm:p-6">
+        {messages}
         <div className="flex flex-1 items-center justify-center">
           <StateMessage
             icon="✓"
             tone="ok"
-            title="Hiç bulgu yok"
-            actions={<Button onClick={onNewAnalysis}>Yeni analiz</Button>}
+            title="Sorun bulunmadı"
+            actions={<Button onClick={onNewAnalysis}>Başka dosya analiz et</Button>}
           >
             Statik analiz {result.files.length} dosyada sorun bulmadı.
           </StateMessage>
         </div>
-      ) : (
-        <>
-          <div className="grid min-h-0 flex-1 grid-cols-1 grid-rows-[minmax(0,1fr)_minmax(0,1fr)] gap-6 p-4 sm:p-6 lg:grid-cols-[minmax(340px,2fr)_3fr] lg:grid-rows-[minmax(0,1fr)]">
-            <div className={`${CARD} min-h-0 min-w-0 overflow-hidden`}>
-            <FindingList
+        {chatPanel && <div className={`${CARD} h-[45%] min-h-0 overflow-hidden`}>{chatPanel}</div>}
+      </div>
+    );
+  }
+
+  return (
+    <div className="relative flex h-full flex-col">
+      {(notice || (result.warnings?.length ?? 0) > 0) && (
+        <div className="shrink-0 space-y-2 px-4 pt-4 sm:px-6">{messages}</div>
+      )}
+      <div className="grid min-h-0 flex-1 grid-cols-1 grid-rows-[minmax(0,1fr)_minmax(0,1fr)] gap-5 p-4 pb-28 sm:p-6 sm:pb-28 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)] lg:grid-rows-[minmax(0,1fr)]">
+        <CodePane
+          file={file}
+          source={result.sources?.[file]}
+          marks={marks}
+          focusLine={selectedRow?.finding.file === file ? selectedRow.finding.line_start : null}
+          onReanalyze={onReanalyze}
+        />
+        <section className={`${CARD} flex min-h-0 min-w-0 flex-col`}>
+          <header className="flex shrink-0 items-start gap-4 border-b border-border px-5 py-4">
+            <div className="min-w-0 flex-1">
+              <div className="inline-flex rounded-[var(--radius-control)] bg-sunken p-0.5" role="tablist">
+                {(
+                  [
+                    ['findings', 'Bulgular ve İyileştirmeler'],
+                    ['chat', 'Claude'],
+                  ] as const
+                ).map(([value, label]) => (
+                  <button
+                    key={value}
+                    type="button"
+                    role="tab"
+                    aria-selected={panel === value}
+                    onClick={() => setPanel(value)}
+                    className={`rounded-[8px] px-3 py-1.5 text-[13px] font-semibold transition-colors focus-visible:outline-2 focus-visible:outline-accent ${panel === value ? 'bg-panel text-strong shadow-sm' : 'text-subtle hover:text-strong'}`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <p className="mt-1.5 text-[13px] text-subtle">
+                {panel === 'findings'
+                  ? 'Uygulamak istediğiniz düzeltmeleri seçin.'
+                  : 'İstediğiniz değişikliği yazın; Claude kodu önerir, siz uygularsınız.'}
+                {result.estimated_cost_usd != null && panel === 'findings' && (
+                  <span className="text-hint"> Analiz maliyeti {formatUsd(result.estimated_cost_usd)}.</span>
+                )}
+              </p>
+            </div>
+            <Pill tone={ready > 0 ? 'ok' : 'neutral'} dot={false}>
+              {ready} Hazır
+            </Pill>
+          </header>
+          {panel === 'chat' ? (
+            <div className="min-h-0 flex-1">{chatPanel}</div>
+          ) : (
+          <div className="min-h-0 flex-1 overflow-auto p-4">
+            <FindingCards
               rows={rows}
-              orphans={orphans}
-              showOrphans={showOrphans}
-              onToggleOrphans={() => setShowOrphans((v) => !v)}
-              category={category}
-              counts={counts}
-              onCategory={changeCategory}
+              labels={labels}
               selectedId={selectedRow?.finding.id ?? null}
               checked={checked}
               applied={applied}
               onSelect={setSelectedId}
               onToggleChecked={toggleChecked}
+              onApplyOne={(row) => row.suggestion && openConfirm([row.suggestion])}
             />
-            </div>
-            <div className={`${CARD} min-h-0 min-w-0 overflow-hidden`}>
-              <FindingDetail
-                row={selectedRow}
-                applied={selectedRow?.suggestion ? applied.has(selectedRow.suggestion.id) : false}
-              />
-            </div>
           </div>
-          <ApplyBar
-            checkedCount={checked.size}
-            applicableCount={applicable.length}
-            onApplySelected={() => openConfirm(applicable.filter((s) => checked.has(s.id)))}
-            onApplyAll={() => openConfirm(applicable)}
-            onSelectNone={() => setChecked(new Set())}
-          />
-        </>
-      )}
+          )}
+        </section>
+      </div>
+      <FloatingApplyBar
+        checked={applicable.filter((s) => checked.has(s.id))}
+        applicableCount={applicable.length}
+        onSelectAll={() => setChecked(new Set(applicable.map((s) => s.id)))}
+        onApply={() => openConfirm(applicable.filter((s) => checked.has(s.id)))}
+      />
       <ConfirmApplyModal
         suggestions={pending}
         root={result.root}
@@ -174,34 +266,102 @@ export function ResultsScreen({ jobId, result, onNewAnalysis }: ResultsScreenPro
   );
 }
 
-function ResultsHeader({ result, onNewAnalysis }: { result: AnalyzeResult; onNewAnalysis: () => void }) {
-  const { input_tokens, output_tokens } = result.token_usage;
-  const cost = result.estimated_cost_usd;
-  const costText = cost != null ? ` · tahmini maliyet ${formatUsd(cost)}` : '';
-  const tokens = `${formatNumber(input_tokens + output_tokens)} token (girdi ${formatNumber(input_tokens)}, çıktı ${formatNumber(output_tokens)})${costText}`;
+function CodePane({
+  file,
+  source,
+  marks,
+  focusLine,
+  onReanalyze,
+}: {
+  file: string;
+  source: string | undefined;
+  marks: LineMark[];
+  focusLine: number | null;
+  onReanalyze?: () => void;
+}) {
+  const name = file.split(/[\\/]/).filter(Boolean).pop() ?? file;
+  const language = languageFor(file);
+  const lineCount = source === undefined ? null : source.split('\n').length - (source.endsWith('\n') ? 1 : 0);
   return (
-    <header className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-3 border-b border-border/80 px-4 py-4 sm:px-6">
-      <LogoMark size={28} />
-      <h1 className="min-w-0 flex-1 basis-48 truncate font-mono text-base font-semibold text-strong" title={result.root}>
-        {result.root}
-      </h1>
-      <div className="flex flex-wrap items-center gap-2" title={tokens}>
-        <StatBadge dot="bg-err">
-          Bulgular: <b className="font-semibold text-strong">{result.findings.length}</b>
-        </StatBadge>
-        <StatBadge dot="bg-ok">
-          Öneriler: <b className="font-semibold text-strong">{result.suggestions.length}</b>
-        </StatBadge>
-        {cost != null && (
-          <StatBadge>
-            Tahmini maliyet: <b className="font-semibold text-strong">{formatUsd(cost)}</b>
-          </StatBadge>
+    <section className={`${CARD} flex min-h-0 min-w-0 flex-col overflow-hidden`}>
+      <header className="flex shrink-0 items-baseline gap-3 border-b border-border px-5 py-3.5">
+        <h2 className="truncate font-mono text-[15px] font-medium text-strong" title={file}>
+          {name}
+        </h2>
+        <span className="text-[13px] text-subtle">{LANGUAGE_NAMES[language] ?? language}</span>
+        {lineCount !== null && <span className="text-[13px] text-subtle">{lineCount} satır</span>}
+      </header>
+      <div className="min-h-0 flex-1">
+        {source === undefined ? (
+          <p className="p-8 text-center text-sm text-subtle">Bu dosyanın içeriği gösterilemiyor.</p>
+        ) : (
+          <Suspense
+            fallback={
+              <div className="flex h-full items-center justify-center text-subtle">
+                <Spinner className="size-5" />
+              </div>
+            }
+          >
+            <CodeView path={file} source={source} language={language} marks={marks} focusLine={focusLine} />
+          </Suspense>
         )}
       </div>
-      <Button size="sm" onClick={onNewAnalysis}>
-        Yeni analiz
-      </Button>
-    </header>
+      <footer className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-2 border-t border-border px-5 py-3">
+        {onReanalyze && (
+          <Button variant="primary" size="sm" onClick={onReanalyze}>
+            ▶ Yeniden analiz et
+          </Button>
+        )}
+        <span className="text-[13px] text-hint">Tüm testler ve kontroller yerel ortamda yürütülür.</span>
+      </footer>
+    </section>
+  );
+}
+
+const LANGUAGE_NAMES: Record<string, string> = {
+  python: 'Python',
+  typescript: 'TypeScript',
+  javascript: 'JavaScript',
+  markdown: 'Markdown',
+  plaintext: 'Metin',
+};
+
+function FloatingApplyBar({
+  checked,
+  applicableCount,
+  onSelectAll,
+  onApply,
+}: {
+  checked: Suggestion[];
+  applicableCount: number;
+  onSelectAll: () => void;
+  onApply: () => void;
+}) {
+  const files = [...new Set(checked.map((s) => s.patch.file.split(/[\\/]/).pop() ?? s.patch.file))];
+  return (
+    <div className="pointer-events-none absolute inset-x-0 bottom-4 flex justify-center px-4">
+      <div className="pointer-events-auto flex w-full max-w-3xl flex-wrap items-center gap-3 rounded-[var(--radius-sheet)] border border-border bg-panel/95 px-4 py-3 shadow-lg shadow-strong/10 backdrop-blur">
+        <p className="min-w-0 flex-1 text-sm text-muted">
+          {checked.length > 0 ? (
+            <>
+              <span aria-hidden className="mr-2 inline-block size-2 rounded-full bg-ok" />
+              <span className="font-semibold text-strong">{checked.length} iyileştirme seçildi</span>
+              <span className="text-subtle"> • {files.join(', ')} güncellenmeye hazır</span>
+            </>
+          ) : applicableCount > 0 ? (
+            'Uygulamak istediğiniz düzeltmeleri işaretleyin.'
+          ) : (
+            'Uygulanmaya hazır düzeltme yok.'
+          )}
+        </p>
+        <Button size="sm" onClick={onSelectAll} disabled={applicableCount === 0}>
+          Tümünü seç
+        </Button>
+        <Button size="sm" variant="primary" onClick={onApply} disabled={checked.length === 0}>
+          Seçilenleri uygula →
+        </Button>
+      </div>
+    </div>
   );
 }
 
@@ -215,13 +375,13 @@ function AppliedToast({ response, onClose }: { response: ApplyResponse | null; o
       {response && (
         <motion.div
           role="status"
-          className="fixed right-4 bottom-20 z-40 w-[min(24rem,calc(100vw-2rem))] rounded-2xl border border-ok/20 bg-panel p-4 shadow-2xl shadow-black/50"
+          className="fixed right-4 bottom-20 z-40 w-[min(24rem,calc(100vw-2rem))] rounded-[var(--radius-sheet)] border border-border border-l-[3px] border-l-ok bg-panel p-4 shadow-lg shadow-strong/10"
           initial={{ opacity: 0, y: 12 }}
           animate={{ opacity: 1, y: 0 }}
           exit={{ opacity: 0, y: 8 }}
         >
           <div className="flex items-start gap-3">
-            <span className="text-emerald-300">✓</span>
+            <span className="text-ok-ink">✓</span>
             <div className="min-w-0 flex-1 text-sm">
               <p className="font-semibold text-strong">
                 {response.applied_ids.length} öneri {response.changed_files.length} dosyaya uygulandı
@@ -230,7 +390,7 @@ function AppliedToast({ response, onClose }: { response: ApplyResponse | null; o
                 Yedek: {response.backup_path}
               </p>
             </div>
-            <button type="button" onClick={onClose} aria-label="Kapat" className="rounded-lg text-muted hover:text-text focus-visible:ring-2 focus-visible:ring-accent/60 focus-visible:outline-none">
+            <button type="button" onClick={onClose} aria-label="Kapat" className="rounded-[var(--radius-control)] text-muted hover:text-text focus-visible:ring-2 focus-visible:ring-accent/60 focus-visible:outline-none">
               ✕
             </button>
           </div>

@@ -12,6 +12,7 @@ from itertools import count
 from pathlib import Path
 
 from mytool.core.analyzers.base import Analyzer, AnalyzerError
+from mytool.core.analyzers.messages_tr import SYNTAX_RULES
 from mytool.core.analyzers.ruff import RuffAnalyzer
 from mytool.core.config import Config, is_denied
 from mytool.core.languages import plugin_for
@@ -246,9 +247,14 @@ def _window_groups(findings: list[Finding], total_lines: int) -> list[_Group]:
 
 
 def _make_groups(path: Path, text_lines: list[str], findings: list[Finding]) -> list[_Group]:
-    in_unit = [f for f in findings if f.symbol]
-    module_level = [f for f in findings if not f.symbol]
-    groups = _unit_groups(_units_for(path), in_unit) if in_unit else []
+    # A file with syntax errors does not parse until all of them are fixed, so they go to
+    # the model together, with the whole file, and come back as one verifiable fix.
+    syntax = [f for f in findings if f.rule in SYNTAX_RULES]
+    rest = [f for f in findings if f.rule not in SYNTAX_RULES]
+    groups = [_Group(None, 1, len(text_lines), syntax)] if syntax and text_lines else []
+    in_unit = [f for f in rest if f.symbol]
+    module_level = [f for f in rest if not f.symbol]
+    groups += _unit_groups(_units_for(path), in_unit) if in_unit else []
     return groups + _window_groups(module_level, len(text_lines))
 
 
@@ -377,7 +383,7 @@ def _verify_suggestions(run: AnalysisRun, cfg: Config, progress: Progress = _SIL
                 if suggestion.patch is None:
                     continue
                 if cfg.verify:
-                    message = f"{report.file.name}: {suggestion.id} doğrulanıyor"
+                    message = f"{report.file.name}: düzeltme deneniyor"
                     progress.emit(Stage.VERIFY, message, next(step), total)
                 result = (
                     _verify_one(run, stack, workspaces, cfg, suggestion) if cfg.verify else skipped

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import threading
 from pathlib import Path
 
@@ -51,3 +52,39 @@ def test_core_adapter_requires_api_key(monkeypatch: pytest.MonkeyPatch, tmp_path
     with pytest.raises(AdapterError) as info:
         adapter.analyze(tmp_path, verify=True, on_progress=lambda _: None, cancel=threading.Event())
     assert info.value.code == "api_key_missing"
+
+
+def test_connection_resets_are_silenced(caplog: pytest.LogCaptureFixture) -> None:
+    import asyncio
+
+    from server.app import _quiet_connection_resets
+
+    loop = asyncio.new_event_loop()
+    try:
+        _quiet_connection_resets(loop)
+        with caplog.at_level("ERROR", logger="asyncio"):
+            loop.call_exception_handler({"message": "x", "exception": ConnectionResetError(10054)})
+            assert caplog.records == []
+            loop.call_exception_handler({"message": "y", "exception": ValueError("başka")})
+            assert len(caplog.records) == 1
+    finally:
+        loop.close()
+
+
+def test_env_file_loads_without_overriding(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from server.__main__ import load_env_file
+
+    env = tmp_path / ".env"
+    env.write_text(
+        '# yorum\nMYTOOL_TEST_A="bir"\nexport MYTOOL_TEST_B=iki\n'
+        "MYTOOL_TEST_C=\nMYTOOL_TEST_D=terminal\n",
+        encoding="utf-8",
+    )
+    monkeypatch.delenv("MYTOOL_TEST_A", raising=False)
+    monkeypatch.delenv("MYTOOL_TEST_B", raising=False)
+    monkeypatch.setenv("MYTOOL_TEST_D", "önce")
+    assert load_env_file(env) == ["MYTOOL_TEST_A", "MYTOOL_TEST_B"]
+    assert os.environ["MYTOOL_TEST_A"] == "bir"
+    assert os.environ["MYTOOL_TEST_D"] == "önce"
+    monkeypatch.delenv("MYTOOL_TEST_A")
+    monkeypatch.delenv("MYTOOL_TEST_B")

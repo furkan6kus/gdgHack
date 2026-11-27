@@ -9,14 +9,43 @@ import sys
 import threading
 import time
 import webbrowser
+from pathlib import Path
 
 HOST = "127.0.0.1"  # never bind to other interfaces: the API can modify files
 DEFAULT_PORT = 8765
 STARTUP_TIMEOUT_S = 15.0
+GRACEFUL_SHUTDOWN_S = 2
+
+
+ENV_FILE = Path(__file__).resolve().parent.parent / ".env"
+
+
+def load_env_file(path: Path = ENV_FILE) -> list[str]:
+    """Read KEY=value lines from the repo's .env (git-ignored) into os.environ.
+
+    Values already set in the terminal win. Returns the names that were loaded,
+    never the values, so secrets are not printed.
+    """
+    loaded: list[str] = []
+    try:
+        lines = path.read_text(encoding="utf-8-sig").splitlines()
+    except OSError:
+        return loaded
+    for raw in lines:
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.removeprefix("export ").strip()
+        value = value.strip().strip('"').strip("'")
+        if key and value and key not in os.environ:
+            os.environ[key] = value
+            loaded.append(key)
+    return loaded
 
 
 def _parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(prog="python -m server", description="mytool web arayüzü")
+    parser = argparse.ArgumentParser(prog="python -m server", description="Verifix web arayüzü")
     parser.add_argument("--port", type=int, default=DEFAULT_PORT, help="sunucu portu")
     parser.add_argument("--no-browser", action="store_true", help="tarayıcıyı açma")
     parser.add_argument(
@@ -77,9 +106,18 @@ def _print_settings() -> None:
         f"Model: {cfg.model} · harcama sınırı: ${cfg.max_cost_usd:.2f}/analiz · "
         f"ANTHROPIC_API_KEY: {key}"
     )
+    from server.notify import TelegramNotifier
+
+    telegram = (
+        "açık" if TelegramNotifier().configured else "kapalı (TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID)"
+    )
+    print(f"Telegram bildirimi: {telegram}")
 
 
 def main() -> None:
+    loaded = load_env_file()
+    if loaded:
+        print(f".env okundu: {', '.join(loaded)}")
     args = _parse_args()
     try:
         import uvicorn
@@ -96,11 +134,19 @@ def main() -> None:
     url = f"http://{HOST}:{args.port}/"
     if not (DEFAULT_DIST / "index.html").is_file():
         print("Uyarı: web/dist bulunamadı. Önce `cd web && npm ci && npm run build` çalıştırın.")
-    print(f"mytool UI: {url}  (durdurmak için Ctrl+C)")
+    print(f"Verifix: {url}")
     _print_settings()
     if not args.no_browser:
         threading.Thread(target=_open_when_ready, args=(url, args.port), daemon=True).start()
-    uvicorn.run(create_app(), host=HOST, port=args.port, log_level="warning")
+    print("Durdurmak için Ctrl+C (en geç birkaç saniyede kapanır).")
+    # Live progress streams (SSE) stay open; without a timeout Ctrl+C waits for them forever.
+    uvicorn.run(
+        create_app(),
+        host=HOST,
+        port=args.port,
+        log_level="warning",
+        timeout_graceful_shutdown=GRACEFUL_SHUTDOWN_S,
+    )
 
 
 if __name__ == "__main__":

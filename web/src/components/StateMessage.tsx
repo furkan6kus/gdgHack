@@ -5,10 +5,10 @@ import { CARD } from './ui';
 type Tone = 'neutral' | 'ok' | 'warn' | 'err';
 
 const TONE_RING: Record<Tone, string> = {
-  neutral: 'bg-white/[0.04] text-muted ring-border',
-  ok: 'bg-ok/10 text-emerald-300 ring-ok/25',
-  warn: 'bg-warn/10 text-amber-300 ring-warn/30',
-  err: 'bg-err/10 text-rose-300 ring-err/30',
+  neutral: 'bg-hover text-muted ring-border',
+  ok: 'bg-ok/10 text-ok-ink ring-ok/25',
+  warn: 'bg-warn/10 text-warn-ink ring-warn/30',
+  err: 'bg-err/10 text-err-ink ring-err/30',
 };
 
 interface StateMessageProps {
@@ -45,7 +45,7 @@ export function ApiKeyMissingHelp() {
         LLM açıklamaları için <code className="font-mono text-text">ANTHROPIC_API_KEY</code> ortam
         değişkeni gerekiyor. Anahtarı tanımlayıp sunucuyu yeniden başlatın:
       </p>
-      <pre className="mt-3 overflow-x-auto rounded-xl border border-border bg-white/[0.02] p-4 text-left font-mono text-xs text-text">
+      <pre className="mt-3 overflow-x-auto rounded-[var(--radius-control)] border border-border bg-sunken p-4 text-left font-mono text-xs text-text">
         export ANTHROPIC_API_KEY=…{'\n'}python -m server
       </pre>
       <p className="mt-3 text-xs text-subtle">Anahtarın değeri arayüze hiçbir zaman gönderilmez.</p>

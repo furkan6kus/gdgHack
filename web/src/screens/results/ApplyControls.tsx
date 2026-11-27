@@ -1,53 +1,6 @@
 import type { ErrorPayload, Suggestion } from '../../api/types';
 import { Modal } from '../../components/Modal';
-import { Button, Callout, INSET, Kbd, Spinner } from '../../components/ui';
-
-interface ApplyBarProps {
-  checkedCount: number;
-  applicableCount: number;
-  onApplySelected: () => void;
-  onApplyAll: () => void;
-  onSelectNone: () => void;
-}
-
-export function ApplyBar({
-  checkedCount,
-  applicableCount,
-  onApplySelected,
-  onApplyAll,
-  onSelectNone,
-}: ApplyBarProps) {
-  return (
-    <footer className="flex shrink-0 flex-wrap items-center gap-3 border-t border-border bg-panel px-4 py-3 sm:px-6">
-      <span className="text-sm text-muted">
-        {checkedCount > 0 ? (
-          <>
-            <span className="font-semibold text-strong">{checkedCount}</span> öneri seçili
-          </>
-        ) : (
-          'Uygulamak istediğiniz önerileri işaretleyin'
-        )}
-      </span>
-      {checkedCount > 0 && (
-        <Button size="sm" variant="ghost" onClick={onSelectNone}>
-          Hiçbiri
-        </Button>
-      )}
-      <span className="hidden items-center gap-1.5 text-[11px] text-subtle xl:flex">
-        <Kbd>j</Kbd>
-        <Kbd>k</Kbd> gezin · <Kbd>space</Kbd> seç
-      </span>
-      <div className="ml-auto flex gap-2">
-        <Button onClick={onApplyAll} disabled={applicableCount === 0}>
-          Tümünü uygula ({applicableCount})
-        </Button>
-        <Button variant="primary" onClick={onApplySelected} disabled={checkedCount === 0}>
-          Seçilileri uygula
-        </Button>
-      </div>
-    </footer>
-  );
-}
+import { Button, Callout, INSET, Spinner } from '../../components/ui';
 
 interface ConfirmApplyModalProps {
   suggestions: Suggestion[];
@@ -67,6 +20,7 @@ export function ConfirmApplyModal({
   onClose,
 }: ConfirmApplyModalProps) {
   const byFile = groupByFile(suggestions);
+  const untested = suggestions.filter((s) => s.verification.tested === false).length;
   const footer = (
     <>
       <Button onClick={onClose} disabled={applying}>
@@ -98,6 +52,12 @@ export function ConfirmApplyModal({
             </li>
           ))}
         </ul>
+        {untested > 0 && (
+          <Callout tone="warn" className="!p-3 text-xs">
+            {untested} öneri testle doğrulanmadı: yalnız kodun derlendiği ve ruff'ın yeni hata
+            bulmadığı denetlendi. Uygulamadan önce farkı gözden geçirin.
+          </Callout>
+        )}
         <Callout tone="info" className="flex gap-2.5 !p-3 text-xs">
           <span aria-hidden>⛁</span>
           <p className="min-w-0 break-words text-muted">

@@ -23,6 +23,10 @@ make it unique within the code.
 - If you are unsure, or no safe fix exists, give an explanation only: set both `original` and \
 `replacement` to "".
 - To delete code, set `replacement` to "".
+- Syntax errors (rule `invalid-syntax` or `syntax-error`) arrive together with the whole \
+file: return ONE fix that resolves all of them at once (list every syntax finding id), so the \
+file parses afterwards. Its `original` spans from the first to the last line you change. Use \
+4 spaces for indentation in `replacement`. Fix only what keeps the code from parsing.
 """
 
 EXPLAIN_SYSTEM = """\

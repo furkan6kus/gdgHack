@@ -12,17 +12,44 @@ class PatchError(ValueError):
     """The fix cannot be located in the unit source; message is for the user."""
 
 
+def _match_ignoring_indent(source: str, original: str) -> str | None:
+    """The source text whose lines equal `original`'s apart from surrounding whitespace.
+
+    Models often re-type tabs as spaces (or the reverse), which is exactly what
+    indentation errors are about. The match must be unique; the returned text is
+    the verbatim source, so the patch still replaces what is really in the file.
+    """
+    want = [line.strip() for line in original.rstrip("\r\n").split("\n")]
+    if not any(want):
+        return None
+    lines = source.splitlines(keepends=True)
+    hits = [
+        i
+        for i in range(len(lines) - len(want) + 1)
+        if all(lines[i + k].strip() == want[k] for k in range(len(want)))
+    ]
+    if len(hits) != 1:
+        return None
+    block = "".join(lines[hits[0] : hits[0] + len(want)])
+    return block if original.endswith("\n") else block.rstrip("\r\n")
+
+
 def build_patch(unit_source: str, file: Path, unit_start_line: int, fix: LLMFix) -> Patch | None:
     if not fix.original:
         return None
-    count = unit_source.count(fix.original)
+    original = fix.original
+    count = unit_source.count(original)
+    if count == 0:
+        loose = _match_ignoring_indent(unit_source, original)
+        if loose is not None:
+            original, count = loose, 1
     if count != 1:
         raise PatchError("bulunamadı" if count == 0 else f"{count} yerde eşleşti")
-    start = unit_start_line + unit_source[: unit_source.index(fix.original)].count("\n")
-    end = start + fix.original.rstrip("\r\n").count("\n")
+    start = unit_start_line + unit_source[: unit_source.index(original)].count("\n")
+    end = start + original.rstrip("\r\n").count("\n")
     return Patch(
         file=file,
-        original=fix.original,
+        original=original,
         new=fix.replacement,
         lines=LineRange(start=start, end=end),
     )

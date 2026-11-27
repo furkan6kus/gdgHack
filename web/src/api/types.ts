@@ -27,6 +27,8 @@ export interface VerificationResult {
   status: VerificationStatus;
   detail: string;
   duration_ms: number;
+  /** false: only syntax + ruff were checked, no tests ran. Absent means tested. */
+  tested?: boolean;
 }
 
 export interface Suggestion {
@@ -67,6 +69,8 @@ export interface AnalyzeResult {
   estimated_cost_usd?: number | null;
   /** Non-fatal notes from the core (spending limit reached, patch mismatch...). Turkish. */
   warnings?: string[];
+  /** Text of each file that has findings, keyed like Finding.file (core adapter only). */
+  sources?: Record<string, string>;
 }
 
 export interface ProgressEvent {
@@ -91,6 +95,25 @@ export interface ApplyResponse {
   applied_ids: string[];
   changed_files: string[];
   backup_path: string;
+  /** Id of the change-history entry (absent when no file text changed). */
+  history_id?: string | null;
+}
+
+export interface FileChange {
+  path: string;
+  name: string;
+  before: string;
+  after: string;
+}
+
+/** One apply from the UI, kept on disk so it can be reviewed and undone. */
+export interface HistoryEntry {
+  id: string;
+  time: string;
+  root: string;
+  explanations: string[];
+  files: FileChange[];
+  undone: boolean;
 }
 
 export interface BrowseEntry {
@@ -115,6 +138,7 @@ export interface HealthResponse {
   status: string;
   adapter: string;
   api_key_configured: boolean;
+  telegram_configured?: boolean;
 }
 
 export const ERROR_CODES = {
@@ -122,3 +146,47 @@ export const ERROR_CODES = {
   cancelled: 'cancelled',
   network: 'network',
 } as const;
+
+export interface ChatMessage {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
+/** A code change Claude proposed in the chat, already checked by the server. */
+export interface ChatEdit {
+  id: string;
+  file: string;
+  original: string;
+  replacement: string;
+  explanation: string;
+  applicable: boolean;
+  problem?: string | null;
+}
+
+export interface ChatResponse {
+  reply: string;
+  edits: ChatEdit[];
+  estimated_cost_usd?: number | null;
+}
+
+export type Effort = 'low' | 'medium' | 'high';
+
+/** Model and effort picked in the UI; sent with every analysis and chat message. */
+export interface LLMChoice {
+  model: string;
+  effort: Effort;
+}
+
+export interface ModelInfo {
+  id: string;
+  name: string;
+  note: string;
+  input_per_mtok: number;
+  output_per_mtok: number;
+}
+
+export interface ModelsResponse {
+  models: ModelInfo[];
+  default_model: string;
+  default_effort: Effort;
+}

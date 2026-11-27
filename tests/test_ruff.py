@@ -85,3 +85,12 @@ def test_real_ruff_run(tmp_path: Path) -> None:
     findings = RuffAnalyzer().run([target], 60)
     rules = {f.rule for f in findings}
     assert {"F401", "S307", "E722"} <= rules
+
+
+def test_asserts_in_tests_are_not_findings(tmp_path: Path) -> None:
+    test_file = tmp_path / "test_x.py"
+    test_file.write_text("def test_a():\n    assert 1 == 1\n")
+    app_file = tmp_path / "app.py"
+    app_file.write_text("def f(x):\n    assert x\n    return x\n")
+    findings = RuffAnalyzer().run([test_file, app_file], 60)
+    assert [(f.file.name, f.rule) for f in findings if f.rule == "S101"] == [("app.py", "S101")]

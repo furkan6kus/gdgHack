@@ -11,15 +11,20 @@ from pathlib import Path
 from typing import Any
 
 from mytool.core.analyzers.base import AnalyzerError
-from mytool.core.analyzers.messages_tr import translate
+from mytool.core.analyzers.messages_tr import SYNTAX_RULES, translate
 from mytool.core.models import Category, Finding, LineRange, Severity
 
 _ERROR_CODES = {"F821", "F822", "F823"}
 _BANDIT = re.compile(r"S\d")
+# `assert` is how pytest tests are written; flagging it there (S101) is only noise.
+TEST_ASSERTS_ALLOWED = (
+    "lint.extend-per-file-ignores = {'test_*.py' = ['S101'], '*_test.py' = ['S101'], "
+    "'**/tests/**' = ['S101'], 'conftest.py' = ['S101']}"
+)
 
 
 def severity_for(code: str | None) -> Severity:
-    if code is None or code.startswith("E9") or code in _ERROR_CODES:
+    if code is None or code in SYNTAX_RULES or code.startswith("E9") or code in _ERROR_CODES:
         return Severity.ERROR
     if code == "E722" or code.startswith(("F", "B")) or _BANDIT.match(code):
         return Severity.WARNING
@@ -31,7 +36,7 @@ def category_for(code: str | None) -> Category:
         return Category.SECURITY
     if code is not None and code.startswith("PERF"):
         return Category.PERF
-    if code is None or code == "E722" or code.startswith(("E9", "F", "B")):
+    if code is None or code in SYNTAX_RULES or code == "E722" or code.startswith(("E9", "F", "B")):
         return Category.BUG
     return Category.STYLE
 
@@ -89,6 +94,8 @@ class RuffAnalyzer:
             "--no-fix",
             "--extend-select",
             "B,S,PERF,SIM",
+            "--config",
+            TEST_ASSERTS_ALLOWED,
             *map(str, files),
         ]
         try:

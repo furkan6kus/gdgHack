@@ -13,7 +13,12 @@ STAGES = ["parsing", "static_analysis", "llm", "verify", "done"]
 
 def test_health_ok(client: TestClient) -> None:
     body = client.get("/api/health").json()
-    assert body == {"status": "ok", "adapter": "mock", "api_key_configured": True}
+    assert body == {
+        "status": "ok",
+        "adapter": "mock",
+        "api_key_configured": True,
+        "telegram_configured": False,
+    }
 
 
 def test_health_no_key(make_client: ClientFactory) -> None:
@@ -140,3 +145,22 @@ def test_cancel_ends_with_cancelled(make_client: ClientFactory, project: Path) -
     events = parse_sse(slow, f"/api/analyze/{job_id}/events")
     assert events[-1][0] == "error"
     assert events[-1][1]["code"] == "cancelled"
+
+
+def test_models_lists_prices(client: TestClient) -> None:
+    body = client.get("/api/models").json()
+    ids = [m["id"] for m in body["models"]]
+    assert ids == ["claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"]
+    sonnet = body["models"][1]
+    assert (sonnet["input_per_mtok"], sonnet["output_per_mtok"]) == (2.0, 10.0)
+
+
+def test_unknown_model_is_rejected(client: TestClient, tmp_path: Path) -> None:
+    body = {"path": str(tmp_path), "llm": {"model": "gpt-x", "effort": "high"}}
+    response = client.post("/api/analyze", json=body)
+    assert response.json()["code"] == "invalid_model"
+
+
+def test_clone_rejects_non_github_url(client: TestClient) -> None:
+    response = client.post("/api/clone", json={"url": "https://example.com/a/b"})
+    assert response.json()["code"] == "invalid_repo_url"

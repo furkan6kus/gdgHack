@@ -29,6 +29,7 @@ from server.contracts import (
     AnalyzeResult,
     FileSummary,
     Finding,
+    LLMChoice,
     Patch,
     ProgressEvent,
     SeverityCounts,
@@ -65,10 +66,15 @@ class CoreAdapter:
         verify: bool,
         on_progress: ProgressCallback,
         cancel: threading.Event,
+        llm: LLMChoice | None = None,
     ) -> AnalyzeResult:
         if not self.api_key_configured():
             raise AdapterError(API_KEY_MISSING, "ANTHROPIC_API_KEY tanımlı değil.")
-        cfg = load_config(verify=verify)
+        cfg = load_config(
+            verify=verify,
+            model=llm.model if llm else None,
+            effort=llm.effort if llm else None,
+        )
 
         def forward(event: core.ProgressEvent) -> None:
             on_progress(ProgressEvent.model_validate(event.model_dump(mode="json")))
@@ -98,9 +104,9 @@ class CoreAdapter:
         if run is None:
             raise AdapterError(APPLY_FAILED, "Analiz sonucu bulunamadı; yeniden analiz edin.", 409)
         wanted = {_core_id(s.id) for s in suggestions}
-        eligible = {s.id for r in run.reports for s in r.suggestions if fix_eligible(s)}
+        eligible = {s.id for r in run.reports for s in r.suggestions if _applicable(s)}
         if not wanted <= eligible:  # the server already checks; core re-checks
-            raise AdapterError(APPLY_FAILED, "Yalnızca testleri geçen öneriler uygulanabilir.")
+            raise AdapterError(APPLY_FAILED, "Yalnızca doğrulaması geçen öneriler uygulanabilir.")
         project = find_project_root(root / "x" if root.is_dir() else root)
         result = apply_suggestions(run.reports, wanted, project / ".mytool" / "backup")
         applied = [o for o in result.outcomes if o.applied]
@@ -144,6 +150,7 @@ def to_ui_result(
         token_usage=TokenUsage(input_tokens=usage.input_tokens, output_tokens=usage.output_tokens),
         estimated_cost_usd=estimate_cost(model, usage) if model else None,
         warnings=list(run.warnings),
+        sources=_sources(run, base),
     )
 
 
@@ -186,18 +193,54 @@ def _verification(s: core.Suggestion) -> VerificationResult:
         return VerificationResult(
             status="passed", detail=v.detail or "Testler geçti.", duration_ms=ms
         )
-    if v.method == core.VerifyMethod.SYNTAX:
-        detail = "Doğrulanamadı: yalnız sözdizimi denetlendi"
+    if _syntax_passed(s):
+        detail = "Testle doğrulanmadı: kod derleniyor ve ruff yeni hata bulmadı"
         return VerificationResult(
-            status="skipped",
+            status="passed",
             detail=f"{detail} ({v.detail})." if v.detail else f"{detail}.",
             duration_ms=ms,
+            tested=False,
         )
     if v.detail == "--no-verify":
         return VerificationResult(
             status="skipped", detail="Doğrulama kullanıcı tarafından kapatıldı.", duration_ms=0
         )
     return VerificationResult(status="skipped", detail=v.detail or "Doğrulanmadı.", duration_ms=ms)
+
+
+MAX_SOURCE_BYTES = 300_000
+
+
+def _sources(run: core.AnalysisRun, base: Path) -> dict[str, str]:
+    """Text of the files that have findings (small files only), for the UI's code pane."""
+    sources: dict[str, str] = {}
+    for report in run.reports:
+        if not report.findings:
+            continue
+        try:
+            if report.file.stat().st_size > MAX_SOURCE_BYTES:
+                continue
+            sources[_rel(report.file, base)] = report.file.read_text(
+                encoding="utf-8", errors="replace"
+            )
+        except OSError:
+            continue
+    return sources
+
+
+def _syntax_passed(s: core.Suggestion) -> bool:
+    v = s.verification
+    return (
+        s.patch is not None
+        and v is not None
+        and v.status == core.VerifyStatus.PASSED
+        and v.method == core.VerifyMethod.SYNTAX
+    )
+
+
+def _applicable(s: core.Suggestion) -> bool:
+    """UI rule: test-backed passes, and syntax-only passes (the UI warns before applying)."""
+    return fix_eligible(s) or _syntax_passed(s)
 
 
 def _file_summary(report: core.Report, base: Path) -> FileSummary:

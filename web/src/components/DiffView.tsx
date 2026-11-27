@@ -3,22 +3,24 @@ import '../lib/monaco';
 import { DiffEditor, type Monaco } from '@monaco-editor/react';
 import { Spinner } from './ui';
 
-const THEME = 'mytool-dark';
+const THEME = 'mytool-paper';
 
 function defineTheme(monaco: Monaco): void {
   monaco.editor.defineTheme(THEME, {
-    base: 'vs-dark',
+    base: 'vs',
     inherit: true,
     rules: [],
     colors: {
-      'editor.background': '#0b0f17',
-      'editorGutter.background': '#0b0f17',
-      'editor.lineHighlightBackground': '#ffffff00',
-      'diffEditor.insertedTextBackground': '#10b98126',
-      'diffEditor.removedTextBackground': '#f0645a26',
-      'diffEditor.insertedLineBackground': '#10b98112',
-      'diffEditor.removedLineBackground': '#f0645a12',
-      'editorLineNumber.foreground': '#475569',
+      'editor.background': '#ffffff',
+      'editorGutter.background': '#fbfbfd',
+      'editor.lineHighlightBackground': '#00000000',
+      'diffEditor.insertedTextBackground': '#248a3d2e',
+      'diffEditor.removedTextBackground': '#d700152e',
+      'diffEditor.insertedLineBackground': '#eaf8ec',
+      'diffEditor.removedLineBackground': '#ffecec',
+      'diffEditor.diagonalFill': '#e5e5ea80',
+      'editorLineNumber.foreground': '#8e8e93',
+      'editorLineNumber.activeForeground': '#1c1c1e',
     },
   });
 }
@@ -52,8 +54,9 @@ export default function DiffView({ modelKey, original, modified, language }: Dif
         renderSideBySideInlineBreakpoint: 520,
         minimap: { enabled: false },
         scrollBeyondLastLine: false,
-        fontSize: 12.5,
-        fontFamily: 'JetBrains Mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
+        fontSize: 13,
+        lineHeight: 20,
+        fontFamily: 'SF Mono, JetBrains Mono, ui-monospace, Menlo, Consolas, monospace',
         lineNumbersMinChars: 3,
         renderOverviewRuler: false,
         automaticLayout: true,

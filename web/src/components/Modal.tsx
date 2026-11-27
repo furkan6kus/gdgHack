@@ -24,7 +24,7 @@ export function Modal({ open, title, onClose, children, footer, width = 'max-w-l
     <AnimatePresence>
       {open && (
         <motion.div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-strong/25 p-4"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
@@ -37,7 +37,7 @@ export function Modal({ open, title, onClose, children, footer, width = 'max-w-l
             role="dialog"
             aria-modal="true"
             aria-label={title}
-            className={`flex max-h-[85vh] w-full ${width} flex-col overflow-hidden rounded-2xl border border-border bg-panel shadow-2xl shadow-black/50`}
+            className={`flex max-h-[85vh] w-full ${width} flex-col overflow-hidden rounded-[var(--radius-sheet)] border border-border bg-panel shadow-xl shadow-strong/15`}
             initial={{ opacity: 0, scale: 0.97, y: 6 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.98, y: 4 }}
@@ -49,14 +49,14 @@ export function Modal({ open, title, onClose, children, footer, width = 'max-w-l
                 type="button"
                 onClick={onClose}
                 aria-label="Kapat"
-                className="rounded-lg p-1.5 text-muted hover:bg-white/[0.06] hover:text-text focus-visible:ring-2 focus-visible:ring-accent/60 focus-visible:outline-none"
+                className="rounded-[var(--radius-control)] p-1.5 text-muted hover:bg-hover hover:text-text focus-visible:ring-2 focus-visible:ring-accent/60 focus-visible:outline-none"
               >
                 ✕
               </button>
             </div>
             <div className="min-h-0 flex-1 overflow-auto">{children}</div>
             {footer && (
-              <div className="flex items-center justify-end gap-2 border-t border-border bg-white/[0.02] px-6 py-4">
+              <div className="flex items-center justify-end gap-2 border-t border-border bg-sunken px-6 py-4">
                 {footer}
               </div>
             )}

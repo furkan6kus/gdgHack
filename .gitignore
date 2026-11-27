@@ -10,3 +10,4 @@ dist/
 .mytool/
 .env
 .env.*
+!.env.example
