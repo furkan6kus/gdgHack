@@ -12,7 +12,7 @@ from pathlib import Path
 from fastapi import FastAPI, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
@@ -171,6 +171,31 @@ def select_applicable(job: Job, suggestion_ids: list[str]) -> list[Suggestion]:
 # --------------------------------------------------------------------------- frontend
 
 
+MISSING_BUILD_PAGE = """<!doctype html>
+<html lang="tr"><head><meta charset="utf-8"><title>mytool</title>
+<style>body{background:#0b0b10;color:#e8e8ee;font:15px/1.6 system-ui,sans-serif;
+display:grid;place-items:center;height:100vh;margin:0}main{max-width:560px;padding:24px}
+code,pre{font-family:ui-monospace,Menlo,Consolas,monospace;background:#1a1a24;
+border:1px solid #272733;border-radius:6px}code{padding:1px 5px}pre{padding:12px}
+h1{font-size:18px}p{color:#8b8b9a}</style></head><body><main>
+<h1>Arayüz henüz derlenmemiş</h1>
+<p>Sunucu çalışıyor ama <code>web/dist</code> bulunamadı. Bir kez derleyip sunucuyu
+yeniden başlatın:</p>
+<pre>cd web
+npm ci
+npm run build
+cd ..
+python -m server</pre>
+<p>Geliştirme modu için ikinci terminalde <code>cd web &amp;&amp; npm run dev</code> çalıştırıp
+<code>http://127.0.0.1:5173</code> adresini açın.</p>
+</main></body></html>"""
+
+
 def _mount_frontend(app: FastAPI, dist_dir: Path) -> None:
     if (dist_dir / "index.html").is_file():
         app.mount("/", StaticFiles(directory=dist_dir, html=True), name="frontend")
+        return
+
+    @app.get("/", include_in_schema=False)
+    async def missing_build() -> HTMLResponse:
+        return HTMLResponse(MISSING_BUILD_PAGE)
