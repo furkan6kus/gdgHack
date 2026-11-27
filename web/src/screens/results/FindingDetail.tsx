@@ -1,7 +1,7 @@
 import { motion } from 'framer-motion';
 import { lazy, Suspense } from 'react';
-import { Spinner } from '../../components/ui';
-import { CATEGORY_LABELS, SEVERITY_LABELS, SEVERITY_TEXT, formatDuration } from '../../lib/labels';
+import { Callout, INSET, Pill, Spinner } from '../../components/ui';
+import { CATEGORY_LABELS, SEVERITY_LABELS, SEVERITY_TONE, formatDuration } from '../../lib/labels';
 import { languageFor, rowTitle, type FindingRow } from './model';
 
 const DiffView = lazy(() => import('../../components/DiffView'));
@@ -14,7 +14,7 @@ interface FindingDetailProps {
 export function FindingDetail({ row, applied }: FindingDetailProps) {
   if (row === null) {
     return (
-      <div className="flex h-full items-center justify-center text-sm text-muted">
+      <div className="flex h-full items-center justify-center p-6 text-center text-sm text-subtle">
         Ayrıntı için soldan bir öneri seçin.
       </div>
     );
@@ -25,7 +25,7 @@ export function FindingDetail({ row, applied }: FindingDetailProps) {
     <div className="flex h-full flex-col">
       <motion.div
         key={row.finding.id}
-        className="shrink-0 px-6 pt-5 pb-4"
+        className="shrink-0 p-6"
         initial={{ opacity: 0, y: 4 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.14 }}
@@ -35,7 +35,7 @@ export function FindingDetail({ row, applied }: FindingDetailProps) {
       {row.suggestion ? (
         <DiffSection row={row} />
       ) : (
-        <div className="flex flex-1 items-center justify-center border-t border-border px-8 text-center text-sm text-muted">
+        <div className="flex flex-1 items-center justify-center border-t border-border p-8 text-center text-sm text-subtle">
           Bu bulgu için öneri yok; düzeltmeyi elle yapabilirsiniz.
         </div>
       )}
@@ -47,30 +47,33 @@ function DetailText({ row, applied }: { row: FindingRow; applied: boolean }) {
   const { finding, suggestion } = row;
   return (
     <>
-      <h2 className="text-[17px] leading-snug font-semibold">{rowTitle(row)}</h2>
-      <p className="mt-1.5 flex flex-wrap items-center gap-x-2 font-mono text-[11.5px] text-muted">
-        <span>
+      <div className="flex flex-wrap items-center gap-2">
+        <Pill tone={SEVERITY_TONE[finding.severity]}>
+          <span className="uppercase">{SEVERITY_LABELS[finding.severity]}</span>
+        </Pill>
+        {suggestion && (
+          <Pill>
+            <span className="uppercase">{CATEGORY_LABELS[suggestion.category]}</span>
+          </Pill>
+        )}
+      </div>
+      <h2 className="mt-3 text-xl leading-snug font-bold text-strong">{rowTitle(row)}</h2>
+      <p className="mt-2 flex flex-wrap items-center gap-x-2 font-mono text-xs text-subtle">
+        <span className="break-all">
           {finding.file}:{finding.line_start}
         </span>
         <span>·</span>
-        <span className="text-text/80">{finding.rule_code}</span>
-        <span>·</span>
-        <span className={SEVERITY_TEXT[finding.severity]}>{SEVERITY_LABELS[finding.severity]}</span>
-        {suggestion && (
-          <>
-            <span>·</span>
-            <span>{CATEGORY_LABELS[suggestion.category]}</span>
-          </>
-        )}
+        <span className="text-muted">{finding.rule_code}</span>
       </p>
       {suggestion && <VerificationLine row={row} applied={applied} />}
       {suggestion && (
-        <p className="mt-4 max-h-32 overflow-auto text-[14px] leading-relaxed text-text/85">
-          {suggestion.explanation}
-        </p>
+        <div className="mt-5">
+          <p className="mb-2 text-xs font-semibold tracking-wider text-subtle uppercase">Açıklama</p>
+          <p className="max-h-32 overflow-auto text-sm leading-relaxed text-muted">{suggestion.explanation}</p>
+        </div>
       )}
-      <p className="mt-3 text-[12px] text-muted/80">
-        <span className="font-mono">{finding.tool}:</span> {finding.message}
+      <p className={`${INSET} mt-4 p-4 text-xs leading-relaxed text-subtle`}>
+        <span className="font-mono text-muted">{finding.tool}:</span> {finding.message}
       </p>
     </>
   );
@@ -80,16 +83,16 @@ function VerificationLine({ row, applied }: { row: FindingRow; applied: boolean 
   const v = row.suggestion!.verification;
   const passed = v.status === 'passed';
   return (
-    <div
-      className={`mt-3 flex items-center gap-2 rounded-md px-2.5 py-1.5 text-[12.5px] ${passed ? 'bg-ok/8 text-ok' : 'bg-warn/8 text-warn'}`}
-    >
-      <span aria-hidden>{passed ? '✓' : '⚠'}</span>
-      <span className="font-medium">{passed ? 'Doğrulandı' : 'Doğrulanamadı'}</span>
-      <span className="min-w-0 truncate text-text/70">{v.detail}</span>
-      <span className="ml-auto shrink-0 font-mono text-[11px] text-muted">
-        {applied ? 'uygulandı' : passed ? formatDuration(v.duration_ms) : 'uygulanamaz'}
-      </span>
-    </div>
+    <Callout tone={passed ? 'ok' : 'warn'} className="mt-4 !py-3">
+      <div className="flex items-center gap-3">
+        <span aria-hidden>{passed ? '✓' : '⚠'}</span>
+        <span className="font-semibold">{passed ? 'Doğrulandı' : 'Doğrulanamadı'}</span>
+        <span className="ml-auto shrink-0 text-xs opacity-70">
+          {applied ? 'uygulandı' : passed ? formatDuration(v.duration_ms) : 'uygulanamaz'}
+        </span>
+      </div>
+      <p className="mt-1 opacity-80">{v.detail}</p>
+    </Callout>
   );
 }
 
@@ -98,7 +101,7 @@ function DiffSection({ row }: { row: FindingRow }) {
   const { patch } = suggestion;
   return (
     <section className="flex min-h-0 flex-1 flex-col border-t border-border">
-      <div className="grid h-8 shrink-0 grid-cols-2 px-6 text-[11px] text-muted">
+      <div className="grid h-9 shrink-0 grid-cols-2 px-6 text-xs font-semibold tracking-wider text-subtle uppercase">
         <span className="self-center">Önce</span>
         <span className="self-center pl-2">Sonra</span>
       </div>

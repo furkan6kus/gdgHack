@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { api, toErrorPayload } from '../api/client';
 import type { BrowseEntry, BrowseResponse, ErrorPayload, Place } from '../api/types';
 import { Modal } from './Modal';
-import { Button, Spinner, Switch } from './ui';
+import { Button, Callout, Spinner, Switch } from './ui';
 
 interface FolderPickerProps {
   open: boolean;
@@ -80,10 +80,10 @@ export function FolderPicker({ open, initialPath, onClose, onPick }: FolderPicke
 
   return (
     <Modal open={open} title="Klasör veya dosya seç" onClose={onClose} footer={footer} width="max-w-3xl">
-      <div className="grid h-[26rem] grid-cols-[180px_minmax(0,1fr)] divide-x divide-border">
+      <div className="grid h-[26rem] grid-cols-[120px_minmax(0,1fr)] divide-x divide-border sm:grid-cols-[180px_minmax(0,1fr)]">
         <PlacesList places={places} current={current} onOpen={navigate} />
         <div className="flex min-h-0 flex-col">
-          <div className="flex shrink-0 items-center gap-2 border-b border-border px-3 py-2">
+          <div className="flex shrink-0 items-center gap-2 border-b border-border px-3 py-2.5">
             <Button
               size="sm"
               variant="ghost"
@@ -102,7 +102,7 @@ export function FolderPicker({ open, initialPath, onClose, onPick }: FolderPicke
               label="Gizliler"
             />
           </div>
-          <div className="shrink-0 border-b border-border px-3 py-2">
+          <div className="shrink-0 border-b border-border px-3 py-2.5">
             <input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
@@ -110,7 +110,7 @@ export function FolderPicker({ open, initialPath, onClose, onPick }: FolderPicke
               aria-label="Bu klasörde ara"
               autoFocus
               spellCheck={false}
-              className="h-8 w-full rounded-md border border-border bg-bg px-2.5 text-sm outline-none placeholder:text-muted/50 focus:border-accent"
+              className="h-9 w-full rounded-xl border border-border bg-bg px-3 text-sm text-strong outline-none placeholder:text-subtle focus-visible:border-accent/60 focus-visible:ring-2 focus-visible:ring-accent/30"
             />
           </div>
           <div className="min-h-0 flex-1 overflow-auto p-1.5">
@@ -120,8 +120,8 @@ export function FolderPicker({ open, initialPath, onClose, onPick }: FolderPicke
               </div>
             )}
             {listing?.kind === 'error' && (
-              <div className="flex h-full flex-col items-center justify-center gap-3 text-sm">
-                <p className="text-err">{listing.error.message}</p>
+              <div className="flex h-full flex-col items-center justify-center gap-3 p-3 text-sm">
+                <Callout tone="err">{listing.error.message}</Callout>
                 <Button size="sm" onClick={() => navigate(undefined)}>
                   Ev klasörüne dön
                 </Button>
@@ -154,11 +154,11 @@ function PlacesList({
   onOpen: (path: string) => void;
 }) {
   return (
-    <nav className="overflow-auto bg-panel-2/30 p-2" aria-label="Hızlı erişim">
+    <nav className="overflow-auto bg-white/[0.02] p-2" aria-label="Hızlı erişim">
       {places.map((place, i) => (
         <div key={place.path}>
           {place.kind === 'drive' && places[i - 1]?.kind !== 'drive' && (
-            <p className="mt-3 mb-1 px-2.5 text-[10px] font-semibold tracking-wide text-muted/70 uppercase">
+            <p className="mt-3 mb-1 px-2.5 text-[10px] font-semibold tracking-wider text-subtle uppercase">
               Sürücüler
             </p>
           )}
@@ -166,9 +166,9 @@ function PlacesList({
             type="button"
             onClick={() => onOpen(place.path)}
             title={place.path}
-            className={`flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-left text-[13px] transition-colors ${current === place.path ? 'bg-accent-soft text-text' : 'text-muted hover:bg-panel-2 hover:text-text'}`}
+            className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[13px] transition-colors focus-visible:ring-2 focus-visible:ring-accent/60 focus-visible:outline-none ${current === place.path ? 'bg-accent-soft text-strong ring-1 ring-accent/40' : 'text-muted hover:bg-white/[0.04] hover:text-text'}`}
           >
-            <span aria-hidden className="w-4 text-center text-accent/80">
+            <span aria-hidden className="w-4 text-center text-accent">
               {PLACE_ICONS[place.kind]}
             </span>
             <span className="truncate">{place.name}</span>
@@ -202,7 +202,7 @@ function EntryList({
 }) {
   if (entries.length === 0) {
     return (
-      <p className="p-6 text-center text-sm text-muted">
+      <p className="p-6 text-center text-sm text-subtle">
         {filtered ? 'Eşleşen dosya ya da klasör yok.' : 'Bu klasör boş.'}
       </p>
     );
@@ -217,9 +217,9 @@ function EntryList({
               type="button"
               onClick={() => (entry.is_dir ? onOpenDir(entry.path) : onSelectFile(entry.path))}
               onDoubleClick={() => !entry.is_dir && onPickFile(entry.path)}
-              className={`flex w-full items-center gap-2.5 rounded-md px-3 py-1.5 text-left text-sm transition-colors ${selected ? 'bg-accent-soft text-text' : 'hover:bg-panel-2'}`}
+              className={`flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-sm transition-colors focus-visible:ring-2 focus-visible:ring-accent/60 focus-visible:outline-none ${selected ? 'bg-accent-soft text-strong ring-1 ring-accent/40' : 'hover:bg-white/[0.04]'}`}
             >
-              <span aria-hidden className={`w-3 ${entry.is_dir ? 'text-accent' : 'text-muted/60'}`}>
+              <span aria-hidden className={`w-3 ${entry.is_dir ? 'text-accent' : 'text-subtle'}`}>
                 {entry.is_dir ? '▸' : '·'}
               </span>
               <span className={`truncate font-mono text-[13px] ${entry.is_dir ? '' : 'text-text/80'}`}>

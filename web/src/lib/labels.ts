@@ -1,4 +1,5 @@
 import type { Category, Severity, Stage } from '../api/types';
+import type { Tone } from '../components/ui';
 
 export const STAGE_ORDER: Exclude<Stage, 'error'>[] = [
   'parsing',
@@ -49,6 +50,12 @@ export const SEVERITY_BG: Record<Severity, string> = {
   error: 'bg-err',
   warning: 'bg-warn',
   info: 'bg-info',
+};
+
+export const SEVERITY_TONE: Record<Severity, Tone> = {
+  error: 'err',
+  warning: 'warn',
+  info: 'info',
 };
 
 export function formatDuration(ms: number): string {

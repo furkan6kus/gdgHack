@@ -4,7 +4,7 @@ import { api, toErrorPayload } from '../../api/client';
 import type { AnalyzeResult, ApplyResponse, ErrorPayload, Suggestion } from '../../api/types';
 import { LogoMark } from '../../components/Logo';
 import { StateMessage } from '../../components/StateMessage';
-import { Button } from '../../components/ui';
+import { Button, CARD, StatBadge } from '../../components/ui';
 import { useHotkeys } from '../../hooks/useHotkeys';
 import { formatNumber } from '../../lib/labels';
 import { ApplyBar, ConfirmApplyModal } from './ApplyControls';
@@ -119,7 +119,8 @@ export function ResultsScreen({ jobId, result, onNewAnalysis }: ResultsScreenPro
         </div>
       ) : (
         <>
-          <div className="grid min-h-0 flex-1 grid-cols-[minmax(340px,2fr)_3fr] grid-rows-[minmax(0,1fr)] divide-x divide-border">
+          <div className="grid min-h-0 flex-1 grid-cols-1 grid-rows-[minmax(0,1fr)_minmax(0,1fr)] gap-6 p-4 sm:p-6 lg:grid-cols-[minmax(340px,2fr)_3fr] lg:grid-rows-[minmax(0,1fr)]">
+            <div className={`${CARD} min-h-0 min-w-0 overflow-hidden`}>
             <FindingList
               rows={rows}
               orphans={orphans}
@@ -134,7 +135,8 @@ export function ResultsScreen({ jobId, result, onNewAnalysis }: ResultsScreenPro
               onSelect={setSelectedId}
               onToggleChecked={toggleChecked}
             />
-            <div className="min-w-0 bg-panel/40">
+            </div>
+            <div className={`${CARD} min-h-0 min-w-0 overflow-hidden`}>
               <FindingDetail
                 row={selectedRow}
                 applied={selectedRow?.suggestion ? applied.has(selectedRow.suggestion.id) : false}
@@ -167,15 +169,20 @@ function ResultsHeader({ result, onNewAnalysis }: { result: AnalyzeResult; onNew
   const { input_tokens, output_tokens } = result.token_usage;
   const tokens = `${formatNumber(input_tokens + output_tokens)} token (girdi ${formatNumber(input_tokens)}, çıktı ${formatNumber(output_tokens)})`;
   return (
-    <header className="flex h-12 shrink-0 items-center gap-3 border-b border-border px-4">
-      <LogoMark size={22} />
-      <span className="min-w-0 truncate font-mono text-[13px]" title={result.root}>
+    <header className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-3 border-b border-border/80 px-4 py-4 sm:px-6">
+      <LogoMark size={28} />
+      <h1 className="min-w-0 flex-1 basis-48 truncate font-mono text-base font-semibold text-strong" title={result.root}>
         {result.root}
-      </span>
-      <span className="shrink-0 text-[12px] text-muted" title={tokens}>
-        · {result.findings.length} bulgu · {result.suggestions.length} öneri
-      </span>
-      <Button size="sm" className="ml-auto" onClick={onNewAnalysis}>
+      </h1>
+      <div className="flex flex-wrap items-center gap-2" title={tokens}>
+        <StatBadge dot="bg-err">
+          Bulgular: <b className="font-semibold text-strong">{result.findings.length}</b>
+        </StatBadge>
+        <StatBadge dot="bg-ok">
+          Öneriler: <b className="font-semibold text-strong">{result.suggestions.length}</b>
+        </StatBadge>
+      </div>
+      <Button size="sm" onClick={onNewAnalysis}>
         Yeni analiz
       </Button>
     </header>
@@ -188,22 +195,22 @@ function AppliedToast({ response, onClose }: { response: ApplyResponse | null; o
       {response && (
         <motion.div
           role="status"
-          className="fixed right-4 bottom-18 z-40 w-96 rounded-xl border border-ok/30 bg-panel p-4 shadow-2xl shadow-black/50"
+          className="fixed right-4 bottom-20 z-40 w-[min(24rem,calc(100vw-2rem))] rounded-2xl border border-ok/20 bg-panel p-4 shadow-2xl shadow-black/50"
           initial={{ opacity: 0, y: 12 }}
           animate={{ opacity: 1, y: 0 }}
           exit={{ opacity: 0, y: 8 }}
         >
           <div className="flex items-start gap-3">
-            <span className="text-ok">✓</span>
+            <span className="text-emerald-300">✓</span>
             <div className="min-w-0 flex-1 text-sm">
-              <p className="font-medium">
+              <p className="font-semibold text-strong">
                 {response.applied_ids.length} öneri {response.changed_files.length} dosyaya uygulandı
               </p>
-              <p className="mt-1 truncate font-mono text-[11px] text-muted" title={response.backup_path}>
+              <p className="mt-1 truncate font-mono text-[11px] text-subtle" title={response.backup_path}>
                 Yedek: {response.backup_path}
               </p>
             </div>
-            <button type="button" onClick={onClose} aria-label="Kapat" className="text-muted hover:text-text">
+            <button type="button" onClick={onClose} aria-label="Kapat" className="rounded-lg text-muted hover:text-text focus-visible:ring-2 focus-visible:ring-accent/60 focus-visible:outline-none">
               ✕
             </button>
           </div>

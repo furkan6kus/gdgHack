@@ -167,4 +167,7 @@ Shortcuts are ignored while typing in an input or when focus is inside the diff 
   There is no severity filter; severity is the coloured bar on each row (*Ciddi / Uyarı / Bilgi* on hover).
 - ⚠ (skipped) suggestions are listed with their explanation and diff but cannot be selected or applied.
 - With "Doğrulama yapma" on, every suggestion is ⚠ skipped, so nothing can be applied in that run.
+- Visual style is shared with the Kule dashboard (`public/index.html`): slate palette tokens in `web/src/index.css`,
+  `CARD`/`INSET`/`Pill`/`Callout`/`StatBadge` in `web/src/components/ui.tsx`. Inter and JetBrains Mono are bundled
+  locally via `@fontsource` (no Google Fonts request); mono is used only for paths, file names and code.
 - Mock demo states: `MYTOOL_UI_MOCK_SCENARIO=empty|error|no_key python -m server`.

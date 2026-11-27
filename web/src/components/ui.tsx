@@ -97,11 +97,14 @@ const PILL_TONES: Record<Tone, { pill: string; dot: string }> = {
 export function Pill({
   tone = 'neutral',
   pulse = false,
+  dot = true,
   className = '',
   children,
 }: {
   tone?: Tone;
   pulse?: boolean;
+  /** Hide the dot when the label is already a status glyph (✓ / ⚠). */
+  dot?: boolean;
   className?: string;
   children: ReactNode;
 }) {
@@ -110,7 +113,7 @@ export function Pill({
     <span
       className={`inline-flex items-center gap-2 rounded-full px-2.5 py-1 text-[11px] font-semibold tracking-wide ring-1 ring-inset ${t.pill} ${className}`}
     >
-      <span className={`size-1.5 rounded-full ${t.dot} ${pulse ? 'animate-pulse' : ''}`} />
+      {dot && <span className={`size-1.5 rounded-full ${t.dot} ${pulse ? 'animate-pulse' : ''}`} />}
       {children}
     </span>
   );

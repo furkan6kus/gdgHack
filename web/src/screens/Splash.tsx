@@ -29,7 +29,7 @@ export function Splash({ onDone }: { onDone: () => void }) {
       >
         <LogoMark size={88} animate />
       </motion.div>
-      <div className="flex font-mono text-3xl font-semibold tracking-tight" aria-label={APP_NAME}>
+      <div className="flex font-sans text-3xl font-bold tracking-tight text-strong" aria-label={APP_NAME}>
         {APP_NAME.split('').map((char, i) => (
           <motion.span
             key={i}

@@ -4,7 +4,7 @@ import type { ErrorPayload, HealthResponse } from '../api/types';
 import { FolderPicker } from '../components/FolderPicker';
 import { LogoMark } from '../components/Logo';
 import { ApiKeyMissingHelp } from '../components/StateMessage';
-import { Button, Switch } from '../components/ui';
+import { Button, CARD, Callout, Pill, Switch } from '../components/ui';
 import { APP_NAME, MAX_RECENT_PATHS, STORAGE_KEYS } from '../config';
 import { readJson, writeJson } from '../lib/storage';
 
@@ -53,18 +53,18 @@ export function HomeScreen({ health, healthError, startError, starting, onStart 
   };
 
   return (
-    <div className="flex h-full flex-col items-center overflow-auto px-6 pt-[14vh] pb-12">
+    <div className="flex h-full flex-col items-center overflow-auto px-4 pt-[10vh] pb-12 sm:px-6">
       <div className="w-full max-w-xl">
-        <header className="mb-8 flex items-center gap-3">
-          <LogoMark size={36} />
-          <div>
-            <h1 className="font-mono text-lg font-semibold tracking-tight">{APP_NAME}</h1>
-            <p className="text-xs text-muted">Kodunuzu analiz edin, doğrulanmış düzeltmeler alın.</p>
+        <header className="mb-8 flex flex-wrap items-center gap-4">
+          <LogoMark size={40} />
+          <div className="min-w-0">
+            <h1 className="text-2xl font-bold tracking-tight text-strong">{APP_NAME}</h1>
+            <p className="mt-0.5 text-sm text-subtle">Kodunuzu analiz edin, doğrulanmış düzeltmeler alın.</p>
           </div>
           {health && (
-            <span className="ml-auto rounded border border-border px-2 py-0.5 font-mono text-[10px] text-muted">
+            <Pill className="ml-auto">
               adapter: {health.adapter}
-            </span>
+            </Pill>
           )}
         </header>
 
@@ -79,8 +79,8 @@ export function HomeScreen({ health, healthError, startError, starting, onStart 
           </Banner>
         )}
 
-        <form onSubmit={submit} className="rounded-xl border border-border bg-panel p-4 shadow-xl shadow-black/30">
-          <label htmlFor="path" className="mb-2 block text-xs font-medium text-muted">
+        <form onSubmit={submit} className={`${CARD} p-6 shadow-xl shadow-black/30`}>
+          <label htmlFor="path" className="mb-3 block text-xs font-semibold tracking-wider text-subtle uppercase">
             Analiz edilecek klasör veya dosya
           </label>
           <div className="flex gap-2">
@@ -91,12 +91,12 @@ export function HomeScreen({ health, healthError, startError, starting, onStart 
               placeholder={PATH_PLACEHOLDER}
               autoFocus
               spellCheck={false}
-              className="h-9 min-w-0 flex-1 rounded-md border border-border bg-bg px-3 font-mono text-sm outline-none transition-colors placeholder:text-muted/50 focus:border-accent"
+              className="h-10 min-w-0 flex-1 rounded-xl border border-border bg-bg px-3 font-mono text-sm text-strong outline-none transition-colors placeholder:text-subtle focus-visible:border-accent/60 focus-visible:ring-2 focus-visible:ring-accent/30"
             />
             <Button onClick={() => setPickerOpen(true)}>Gözat…</Button>
           </div>
-          {startError && <p className="mt-2 text-xs text-err">{startError.message}</p>}
-          <div className="mt-4 flex items-center justify-between">
+          {startError && <Callout tone="err" className="mt-3 !p-3 text-xs">{startError.message}</Callout>}
+          <div className="mt-5 flex flex-wrap items-center justify-between gap-3">
             {noticeSeen ? (
               <Switch checked={!verify} onChange={(v) => changeVerify(!v)} label="Doğrulama yapma" />
             ) : (
@@ -107,22 +107,22 @@ export function HomeScreen({ health, healthError, startError, starting, onStart 
             </Button>
           </div>
           {!verify && (
-            <p className="mt-3 text-xs text-warn">
+            <Callout tone="warn" className="mt-4 !p-3 text-xs">
               Doğrulama kapalı: öneriler ⚠ olarak işaretlenir ve uygulanamaz.
-            </p>
+            </Callout>
           )}
         </form>
 
         {recent.length > 0 && (
-          <section className="mt-8">
-            <h2 className="mb-2 text-xs font-medium text-muted">Son kullanılanlar</h2>
-            <ul className="space-y-0.5">
+          <section className="mt-10">
+            <h2 className="mb-3 text-xs font-semibold tracking-wider text-subtle uppercase">Son kullanılanlar</h2>
+            <ul className="space-y-1">
               {recent.map((p) => (
                 <li key={p}>
                   <button
                     type="button"
                     onClick={() => setPath(p)}
-                    className="w-full truncate rounded-md px-2.5 py-1.5 text-left font-mono text-[13px] text-muted transition-colors hover:bg-panel hover:text-text"
+                    className="w-full truncate rounded-xl border border-transparent px-3 py-2 text-left font-mono text-[13px] text-muted transition-colors hover:border-border hover:bg-panel hover:text-text focus-visible:ring-2 focus-visible:ring-accent/60 focus-visible:outline-none"
                   >
                     {p}
                   </button>
@@ -160,14 +160,14 @@ function VerifyNotice({
       initial={{ opacity: 0, y: -6 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, height: 0, marginBottom: 0 }}
-      className="mb-4 overflow-hidden rounded-xl border border-accent/30 bg-accent-soft p-4"
+      className="mb-6 overflow-hidden rounded-2xl border border-info/15 bg-info/[0.06] p-6"
     >
-      <p className="text-sm font-medium">Doğrulama kodu SİZİN makinenizde çalıştırır.</p>
-      <p className="mt-1 text-xs leading-relaxed text-muted">
+      <p className="text-sm font-semibold text-strong">Doğrulama kodu SİZİN makinenizde çalıştırır.</p>
+      <p className="mt-1.5 text-sm leading-relaxed text-muted">
         Her yama geçici bir kopyaya uygulanır ve projenizin testleri ya da sözdizimi kontrolü yerel
         olarak çalıştırılır. İsterseniz doğrulamayı kapatabilirsiniz.
       </p>
-      <div className="mt-3 flex items-center justify-between">
+      <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
         <Switch checked={!verify} onChange={(v) => onVerifyChange(!v)} label="Doğrulama yapma" />
         <Button size="sm" variant="primary" onClick={onDismiss}>
           Anladım
@@ -186,11 +186,12 @@ function Banner({
   title?: string;
   children: React.ReactNode;
 }) {
-  const cls = tone === 'err' ? 'border-err/30 bg-err/8' : 'border-warn/30 bg-warn/8';
   return (
-    <div className={`mb-4 rounded-xl border p-4 text-sm ${cls}`}>
-      {title && <p className={`mb-1 font-medium ${tone === 'err' ? 'text-err' : 'text-warn'}`}>{title}</p>}
+    <Callout tone={tone} className="mb-6">
+      {title && (
+        <p className={`mb-1 font-semibold ${tone === 'err' ? 'text-rose-300' : 'text-amber-300'}`}>{title}</p>
+      )}
       <div className="text-muted">{children}</div>
-    </div>
+    </Callout>
   );
 }

@@ -37,26 +37,26 @@ export function Modal({ open, title, onClose, children, footer, width = 'max-w-l
             role="dialog"
             aria-modal="true"
             aria-label={title}
-            className={`flex max-h-[85vh] w-full ${width} flex-col overflow-hidden rounded-xl border border-border bg-panel shadow-2xl shadow-black/60`}
+            className={`flex max-h-[85vh] w-full ${width} flex-col overflow-hidden rounded-2xl border border-border bg-panel shadow-2xl shadow-black/50`}
             initial={{ opacity: 0, scale: 0.97, y: 6 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.98, y: 4 }}
             transition={{ duration: 0.16, ease: [0.2, 0.8, 0.2, 1] }}
           >
-            <div className="flex items-center justify-between border-b border-border px-5 py-3.5">
-              <h2 className="text-sm font-semibold">{title}</h2>
+            <div className="flex items-center justify-between border-b border-border px-6 py-4">
+              <h2 className="text-base font-semibold text-strong">{title}</h2>
               <button
                 type="button"
                 onClick={onClose}
                 aria-label="Kapat"
-                className="rounded p-1 text-muted hover:bg-panel-2 hover:text-text"
+                className="rounded-lg p-1.5 text-muted hover:bg-white/[0.06] hover:text-text focus-visible:ring-2 focus-visible:ring-accent/60 focus-visible:outline-none"
               >
                 ✕
               </button>
             </div>
             <div className="min-h-0 flex-1 overflow-auto">{children}</div>
             {footer && (
-              <div className="flex items-center justify-end gap-2 border-t border-border bg-panel-2/40 px-5 py-3">
+              <div className="flex items-center justify-end gap-2 border-t border-border bg-white/[0.02] px-6 py-4">
                 {footer}
               </div>
             )}
