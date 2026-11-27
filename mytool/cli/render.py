@@ -26,6 +26,7 @@ from mytool.core.models import (
     VerifyMethod,
     VerifyStatus,
 )
+from mytool.core.pricing import estimate_cost
 
 _LABELS: dict[Category, tuple[str, str]] = {
     Category.BUG: ("HATA", "red"),
@@ -151,8 +152,12 @@ def _render_messages(console: Console, run: AnalysisRun, verbose: bool) -> None:
         console.print(f"[dim]atlandı: {escape(skip)}[/]")
 
 
-def _render_tokens(console: Console, usage: TokenUsage) -> None:
-    console.print(f"Token: giriş {usage.input_tokens}, çıkış {usage.output_tokens}")
+def _render_tokens(console: Console, usage: TokenUsage, model: str) -> None:
+    cost = estimate_cost(model, usage)
+    tail = (
+        "bilinmeyen model, maliyet hesaplanmadı" if cost is None else f"tahmini maliyet ${cost:.4f}"
+    )
+    console.print(f"Token: giriş {usage.input_tokens}, çıkış {usage.output_tokens} — {tail}")
 
 
 def render_reports(
@@ -160,6 +165,7 @@ def render_reports(
     run: AnalysisRun,
     cwd: Path,
     *,
+    model: str,
     diff_only: bool = False,
     verbose: bool = False,
 ) -> None:
@@ -174,7 +180,7 @@ def render_reports(
         console.print("[green]Bulgu yok[/]")
     console.print(_totals(run.reports))
     if verbose:
-        _render_tokens(console, run.usage)
+        _render_tokens(console, run.usage, model)
 
 
 def _profile_table(run: AnalysisRun) -> Table:
@@ -211,13 +217,14 @@ def render_optimize(
     *,
     diff_only: bool = False,
     verbose: bool = False,
+    model: str,
 ) -> None:
     if run.profile:
         console.print(_profile_table(run))
     _render_suggestion_lists(console, run, cwd, diff_only)
     _render_messages(console, run, verbose)
     if verbose:
-        _render_tokens(console, run.usage)
+        _render_tokens(console, run.usage, model)
 
 
 def _line_count(path: Path) -> int:
@@ -243,13 +250,14 @@ def render_shrink(
     *,
     diff_only: bool = False,
     verbose: bool = False,
+    model: str,
 ) -> None:
     _render_suggestion_lists(console, run, cwd, diff_only)
     _render_messages(console, run, verbose)
     total = _shrink_total(run)
     console.print(total or "[green]Kısaltma önerisi yok[/]")
     if verbose:
-        _render_tokens(console, run.usage)
+        _render_tokens(console, run.usage, model)
 
 
 def _translate_status(result: TranslateResult) -> str:
@@ -265,7 +273,7 @@ def _translate_status(result: TranslateResult) -> str:
 
 
 def render_translate(
-    console: Console, result: TranslateResult, lexer: str, *, verbose: bool = False
+    console: Console, result: TranslateResult, lexer: str, *, verbose: bool = False, model: str
 ) -> None:
     """Failed verification never shows code: only the reason (details with verbose)."""
     if result.presentable and result.output:
@@ -283,10 +291,12 @@ def render_translate(
     for warning in result.warnings:
         console.print(f"[yellow]{escape(warning)}[/]")
     if verbose:
-        _render_tokens(console, result.usage)
+        _render_tokens(console, result.usage, model)
 
 
-def render_explain(console: Console, result: ExplainResult, *, verbose: bool = False) -> None:
+def render_explain(
+    console: Console, result: ExplainResult, *, verbose: bool = False, model: str
+) -> None:
     explanation = result.explanation
     if explanation is not None:
         title = escape(result.file.name)
@@ -301,4 +311,4 @@ def render_explain(console: Console, result: ExplainResult, *, verbose: bool = F
     for warning in result.warnings:
         console.print(f"[yellow]{escape(warning)}[/]")
     if verbose:
-        _render_tokens(console, result.usage)
+        _render_tokens(console, result.usage, model)

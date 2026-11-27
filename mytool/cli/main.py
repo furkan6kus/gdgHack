@@ -5,6 +5,7 @@ from __future__ import annotations
 import contextlib
 import io
 import json
+import os
 import sys
 from collections.abc import Callable
 from pathlib import Path
@@ -15,6 +16,7 @@ from rich.console import Console
 from rich.markup import escape
 from rich.panel import Panel
 from rich.prompt import Confirm
+from typer import rich_utils
 
 from mytool import __version__
 from mytool.cli import interact
@@ -36,32 +38,48 @@ from mytool.core.translate import resolve_target
 from mytool.core.translate import translate as translate_file
 from mytool.core.verify import find_project_root
 
+rich_utils.ARGUMENTS_PANEL_TITLE = "Argümanlar"
+rich_utils.OPTIONS_PANEL_TITLE = "Seçenekler"
+rich_utils.COMMANDS_PANEL_TITLE = "Komutlar"
+rich_utils.ERRORS_PANEL_TITLE = "Hata"
+
+EXIT_OK = 0
+EXIT_ERROR = 1  # unexpected error; undo with no backup
+EXIT_USAGE = 2  # usage or input error
+EXIT_FAILED = 3  # tool or LLM failure
+EXIT_INTERRUPTED = 130
+
 app = typer.Typer(
     name="mytool",
-    help="Static analysis with LLM-suggested, verified patches.",
+    help="Statik analiz önce, LLM sonra, doğrulama en son: doğrulanmış yama önerileri.",
     no_args_is_help=True,
     rich_markup_mode="rich",
+    add_completion=False,
+    pretty_exceptions_enable=False,
 )
 console = Console()
 err_console = Console(stderr=True)
 
-PathArg = Annotated[Path, typer.Argument(help="File or directory to process.")]
-DiffOpt = Annotated[bool, typer.Option("--diff", help="Show patches as unified diffs.")]
-FixOpt = Annotated[bool, typer.Option("--fix", help="Apply verified patches.")]
-JsonOpt = Annotated[bool, typer.Option("--json", help="Machine-readable JSON output.")]
-NoVerifyOpt = Annotated[bool, typer.Option("--no-verify", help="Skip patch verification.")]
-ModelOpt = Annotated[str | None, typer.Option("--model", help="LLM model name.")]
+PathArg = Annotated[Path, typer.Argument(help="İşlenecek dosya veya dizin.")]
+FileArg = Annotated[Path, typer.Argument(help="İşlenecek dosya.")]
+DiffOpt = Annotated[bool, typer.Option("--diff", help="Yamaları birleşik diff olarak göster.")]
+FixOpt = Annotated[bool, typer.Option("--fix", help="Doğrulanmış yamaları uygula.")]
+JsonOpt = Annotated[bool, typer.Option("--json", help="Makine okunur JSON çıktısı.")]
+NoVerifyOpt = Annotated[bool, typer.Option("--no-verify", help="Doğrulamayı atla.")]
+ModelOpt = Annotated[str | None, typer.Option("--model", help="LLM model adı.")]
 MaxFindingsOpt = Annotated[
-    int | None, typer.Option("--max-findings", min=1, help="Max findings sent to the LLM.")
+    int | None, typer.Option("--max-findings", min=1, help="LLM'e gönderilecek en çok bulgu.")
 ]
 MaxTokensOpt = Annotated[
-    int | None, typer.Option("--max-tokens", min=1, help="Max output tokens per LLM request.")
+    int | None, typer.Option("--max-tokens", min=1, help="İstek başına en çok çıkış tokeni.")
 ]
-StaticOpt = Annotated[bool, typer.Option("--static", help="Skip the LLM, static findings only.")]
+StaticOpt = Annotated[bool, typer.Option("--static", help="LLM kullanma, yalnız statik bulgular.")]
 TimeoutOpt = Annotated[
-    int | None, typer.Option("--timeout", min=1, help="Subprocess timeout in seconds.")
+    int | None, typer.Option("--timeout", min=1, help="Alt süreç zaman aşımı (saniye).")
 ]
-VerboseOpt = Annotated[bool, typer.Option("--verbose", help="Verbose output.")]
+VerboseOpt = Annotated[
+    bool, typer.Option("--verbose", help="Ayrıntılı çıktı (token ve tahmini maliyet dahil).")
+]
 
 
 def _version_callback(value: bool) -> None:
@@ -80,11 +98,16 @@ def _force_utf8() -> None:
 def _root(
     version: Annotated[
         bool,
-        typer.Option("--version", callback=_version_callback, is_eager=True, help="Show version."),
+        typer.Option("--version", callback=_version_callback, is_eager=True, help="Sürümü göster."),
     ] = False,
 ) -> None:
-    """mytool command line."""
+    """mytool komut satırı."""
     _force_utf8()
+
+
+def _input_error(message: str) -> typer.Exit:
+    err_console.print(f"[red]Hata:[/] {escape(message)}")
+    return typer.Exit(EXIT_USAGE)
 
 
 def _make_llm(config: Config) -> LLMClient:
@@ -144,10 +167,9 @@ def analyze_command(
     timeout: TimeoutOpt = None,
     verbose: VerboseOpt = False,
 ) -> None:
-    """Run static analysis and suggest verified patches."""
+    """Statik analiz yapar, doğrulanmış yama önerir."""
     if not path.exists():
-        err_console.print(f"[red]Error:[/] path not found: {path}")
-        raise typer.Exit(2)
+        raise _input_error(f"yol bulunamadı: {path}")
     config = load_config(
         model=model,
         max_findings=max_findings,
@@ -165,7 +187,9 @@ def analyze_command(
         json_out=json_out,
         fix=fix,
         no_verify=no_verify,
-        render=lambda: render_reports(console, run, Path.cwd(), diff_only=diff, verbose=verbose),
+        render=lambda: render_reports(
+            console, run, Path.cwd(), diff_only=diff, verbose=verbose, model=config.model
+        ),
     )
 
 
@@ -193,7 +217,7 @@ def _present(
         elif interact.selectable_pairs(run) and _is_interactive():
             _apply_interactive(run, path)
     if run.errors:
-        raise typer.Exit(3)
+        raise typer.Exit(EXIT_FAILED)
 
 
 def _root_for(path: Path) -> Path:
@@ -224,48 +248,54 @@ def _apply_interactive(run: AnalysisRun, path: Path) -> None:
 
 @app.command()
 def undo(
-    path: Annotated[Path, typer.Argument(help="Project path.")] = Path("."),
-    yes: Annotated[bool, typer.Option("--yes", help="Do not ask for confirmation.")] = False,
+    path: Annotated[Path, typer.Argument(help="Proje dizini.")] = Path("."),
+    yes: Annotated[bool, typer.Option("--yes", help="Onay sorma.")] = False,
 ) -> None:
-    """Restore files from the latest backup."""
+    """Son yedekten dosyaları geri yükler."""
     root = _root_for(path.resolve())
     backup = latest_backup(root / ".mytool" / "backup")
     if backup is None:
         console.print("[yellow]Geri alınacak yedek yok[/]")
-        raise typer.Exit(1)
+        raise typer.Exit(EXIT_ERROR)
     if not yes:
         if not _is_interactive():
-            err_console.print("[red]Onay gerekli: etkileşimsiz ortamda --yes kullan[/]")
-            raise typer.Exit(2)
+            raise _input_error("onay gerekli: etkileşimsiz ortamda --yes kullan")
         if not Confirm.ask(
             f"{backup.name} yedeği geri yüklensin mi?", default=False, console=console
         ):
-            raise typer.Exit(1)
+            console.print("İptal edildi.")
+            raise typer.Exit(EXIT_OK)
     for restored in restore_backup(backup, root):
         console.print(f"geri yüklendi: {escape(str(restored))}")
 
 
 def _require_file(path: Path) -> None:
     if not path.exists():
-        err_console.print(f"[red]Error:[/] path not found: {path}")
-        raise typer.Exit(2)
+        raise _input_error(f"yol bulunamadı: {path}")
     if not path.is_file():
-        err_console.print(f"[red]Error:[/] bir dosya ver, dizin değil: {path}")
-        raise typer.Exit(2)
+        raise _input_error(f"bir dosya ver, dizin değil: {path}")
+
+
+def _check_bench(path: Path, bench: Path | None) -> None:
+    if bench is None:
+        return
+    if not bench.is_file():
+        raise _input_error(f"benchmark betiği bulunamadı: {bench}")
+    if not bench.resolve().is_relative_to(_root_for(path).resolve()):
+        raise _input_error(f"benchmark betiği proje dışında: {bench}")
 
 
 def _require_api_key(command: str) -> None:
     if not has_api_key():
-        err_console.print(f"[red]Error:[/] {command} için ANTHROPIC_API_KEY tanımlı olmalı")
-        raise typer.Exit(2)
+        raise _input_error(f"{command} için ANTHROPIC_API_KEY tanımlı olmalı")
 
 
 @app.command(name="optimize")
 def optimize_command(
-    path: PathArg,
+    path: FileArg,
     bench: Annotated[
         Path | None,
-        typer.Option("--bench", help="Python script that exercises the code (the workload)."),
+        typer.Option("--bench", help="Kodu çalıştıran Python betiği (iş yükü)."),
     ] = None,
     diff: DiffOpt = False,
     fix: FixOpt = False,
@@ -274,8 +304,8 @@ def optimize_command(
         bool,
         typer.Option(
             "--no-verify",
-            help="Skip patch verification. Profiling still runs the workload "
-            "(bench script, project tests or the file itself) on this machine.",
+            help="Yama doğrulamasını atla. Profil yine de iş yükünü (bench betiği, proje "
+            "testleri veya dosyanın kendisi) bu makinede çalıştırır.",
         ),
     ] = False,
     model: ModelOpt = None,
@@ -283,11 +313,9 @@ def optimize_command(
     timeout: TimeoutOpt = None,
     verbose: VerboseOpt = False,
 ) -> None:
-    """Profile with cProfile and suggest measured speedups."""
+    """cProfile ile profil çıkarır, ölçülmüş hızlanmalar önerir."""
     _require_file(path)
-    if bench is not None and not bench.is_file():
-        err_console.print(f"[red]Error:[/] benchmark betiği bulunamadı: {bench}")
-        raise typer.Exit(2)
+    _check_bench(path, bench)
     _require_api_key("optimize")
     config = load_config(
         model=model,
@@ -305,13 +333,15 @@ def optimize_command(
         json_out=json_out,
         fix=fix,
         no_verify=no_verify,
-        render=lambda: render_optimize(console, run, Path.cwd(), diff_only=diff, verbose=verbose),
+        render=lambda: render_optimize(
+            console, run, Path.cwd(), diff_only=diff, verbose=verbose, model=config.model
+        ),
     )
 
 
 @app.command()
 def shrink(
-    path: PathArg,
+    path: FileArg,
     diff: DiffOpt = False,
     fix: FixOpt = False,
     json_out: JsonOpt = False,
@@ -322,7 +352,7 @@ def shrink(
     timeout: TimeoutOpt = None,
     verbose: VerboseOpt = False,
 ) -> None:
-    """Suggest shorter equivalent code for the longest functions."""
+    """En uzun işlevler için daha kısa, eşdeğer kod önerir."""
     _require_file(path)
     _require_api_key("shrink")
     config = load_config(
@@ -343,7 +373,9 @@ def shrink(
         json_out=json_out,
         fix=fix,
         no_verify=no_verify,
-        render=lambda: render_shrink(console, run, Path.cwd(), diff_only=diff, verbose=verbose),
+        render=lambda: render_shrink(
+            console, run, Path.cwd(), diff_only=diff, verbose=verbose, model=config.model
+        ),
     )
 
 
@@ -359,13 +391,13 @@ def _write_translation(result: TranslateResult, out_file: Path) -> None:
 
 @app.command()
 def translate(
-    path: PathArg,
-    to: Annotated[str, typer.Option("--to", help="Target language (e.g. javascript, go, rust).")],
+    path: FileArg,
+    to: Annotated[str, typer.Option("--to", help="Hedef dil (örn. javascript, go, rust).")],
     out_file: Annotated[
-        Path | None, typer.Option("--out", help="Write the translation to this new file.")
+        Path | None, typer.Option("--out", help="Çeviriyi bu yeni dosyaya yaz.")
     ] = None,
     force: Annotated[
-        bool, typer.Option("--force", help="Overwrite --out (old file backed up).")
+        bool, typer.Option("--force", help="--out dosyasının üzerine yaz (eskisi yedeklenir).")
     ] = False,
     json_out: JsonOpt = False,
     no_verify: NoVerifyOpt = False,
@@ -374,17 +406,14 @@ def translate(
     timeout: TimeoutOpt = None,
     verbose: VerboseOpt = False,
 ) -> None:
-    """Translate a file to another language, function by function."""
+    """Dosyayı işlev işlev başka bir dile çevirir."""
     _require_file(path)
     if not to.strip():
-        err_console.print("[red]Error:[/] --to boş olamaz")
-        raise typer.Exit(2)
+        raise _input_error("--to boş olamaz")
     if out_file is not None and out_file.exists() and not force:
-        err_console.print(f"[red]Error:[/] {out_file} zaten var; üzerine yazmak için --force")
-        raise typer.Exit(2)
+        raise _input_error(f"{out_file} zaten var; üzerine yazmak için --force")
     if out_file is not None and out_file.resolve() == path.resolve():
-        err_console.print("[red]Error:[/] --out kaynak dosya olamaz")
-        raise typer.Exit(2)
+        raise _input_error("--out kaynak dosya olamaz")
     _require_api_key("translate")
     config = load_config(
         model=model,
@@ -400,22 +429,24 @@ def translate(
     if json_out:
         typer.echo(json.dumps(result.model_dump(mode="json"), indent=2, ensure_ascii=False))
     else:
-        render_translate(console, result, resolve_target(to).lexer, verbose=verbose)
+        render_translate(
+            console, result, resolve_target(to).lexer, verbose=verbose, model=config.model
+        )
     if out_file is not None:
         _write_translation(result, out_file)
     if result.errors or not result.presentable:
-        raise typer.Exit(3)
+        raise typer.Exit(EXIT_FAILED)
 
 
 @app.command(name="explain")
 def explain_command(
-    path: PathArg,
+    path: FileArg,
     json_out: JsonOpt = False,
     model: ModelOpt = None,
     max_tokens: MaxTokensOpt = None,
     verbose: VerboseOpt = False,
 ) -> None:
-    """Explain what a file does (in Turkish)."""
+    """Dosyanın ne yaptığını Türkçe açıklar."""
     _require_file(path)
     _require_api_key("explain")
     config = load_config(model=model, max_tokens_per_request=max_tokens)
@@ -425,6 +456,61 @@ def explain_command(
     if json_out:
         typer.echo(json.dumps(result.model_dump(mode="json"), indent=2, ensure_ascii=False))
     else:
-        render_explain(console, result, verbose=verbose)
+        render_explain(console, result, verbose=verbose, model=config.model)
     if result.errors:
-        raise typer.Exit(3)
+        raise typer.Exit(EXIT_FAILED)
+
+
+def _debug() -> bool:
+    return os.environ.get("MYTOOL_DEBUG") == "1"
+
+
+def _say(message: str) -> None:
+    typer.echo(message, err=True)
+
+
+def _os_error(exc: OSError) -> int:
+    detail = exc.strerror or str(exc)
+    where = f": {exc.filename}" if exc.filename else ""
+    _say(f"Hata: dosya işlemi başarısız: {detail}{where}")
+    return EXIT_USAGE
+
+
+def _unexpected(exc: Exception) -> int:
+    _say(f"Beklenmeyen hata: {type(exc).__name__}: {exc}")
+    _say("Ayrıntı için MYTOOL_DEBUG=1 ile tekrar çalıştır.")
+    return EXIT_ERROR
+
+
+def _interrupted() -> int:
+    _say("İptal edildi.")
+    return EXIT_INTERRUPTED
+
+
+def _exit_code(exc: SystemExit) -> int:
+    code = exc.code
+    if code is None:
+        return EXIT_OK
+    if not isinstance(code, int):
+        return EXIT_ERROR
+    return _interrupted() if code == EXIT_INTERRUPTED else code
+
+
+def _run() -> int:
+    try:
+        app()
+    except SystemExit as exc:
+        return _exit_code(exc)
+    except KeyboardInterrupt:
+        return _interrupted()
+    except Exception as exc:
+        if _debug():
+            raise
+        return _os_error(exc) if isinstance(exc, OSError) else _unexpected(exc)
+    return EXIT_OK
+
+
+def main() -> None:
+    """Console entry point: clean messages and exit codes instead of tracebacks."""
+    _force_utf8()
+    sys.exit(_run())

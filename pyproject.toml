@@ -14,7 +14,7 @@ dependencies = [
 ]
 
 [project.scripts]
-mytool = "mytool.cli.main:app"
+mytool = "mytool.cli.main:main"
 
 [build-system]
 requires = ["hatchling"]
