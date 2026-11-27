@@ -138,6 +138,24 @@ class VerificationResult(BaseModel):
     duration_s: float = Field(default=0.0, ge=0)
 
 
+class ProfileEntry(BaseModel):
+    function: str
+    line: int
+    calls: int
+    tottime: float
+    cumtime: float
+
+
+class Benchmark(BaseModel):
+    before_s: float
+    after_s: float
+    runs: int
+
+    @property
+    def speedup(self) -> float:
+        return self.before_s / max(self.after_s, 1e-9)
+
+
 class Suggestion(BaseModel):
     id: str
     finding_ids: list[str]
@@ -145,6 +163,7 @@ class Suggestion(BaseModel):
     explanation: str
     patch: Patch | None = None
     verification: VerificationResult | None = None
+    benchmark: Benchmark | None = None
 
     @property
     def presentable(self) -> bool:
@@ -179,6 +198,7 @@ class AnalysisRun(BaseModel):
     warnings: list[str] = Field(default_factory=list)
     skipped: list[str] = Field(default_factory=list)
     truncated: int = 0
+    profile: list[ProfileEntry] = Field(default_factory=list)
 
     @property
     def usage(self) -> TokenUsage:
@@ -206,3 +226,22 @@ class ApplyResult(BaseModel):
     @property
     def skipped(self) -> list[ApplyOutcome]:
         return [o for o in self.outcomes if not o.applied]
+
+
+class UnitExplanation(BaseModel):
+    name: str
+    purpose: str
+    notes: list[str]
+
+
+class FileExplanation(BaseModel):
+    summary: str
+    units: list[UnitExplanation]
+
+
+class ExplainResult(BaseModel):
+    file: Path
+    explanation: FileExplanation | None = None
+    usage: TokenUsage = Field(default_factory=TokenUsage)
+    errors: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)

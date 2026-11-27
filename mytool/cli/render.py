@@ -7,14 +7,19 @@ from pathlib import Path
 
 from rich.console import Console
 from rich.markup import escape
+from rich.panel import Panel
+from rich.table import Table
 
 from mytool.core.models import (
     AnalysisRun,
+    Benchmark,
     Category,
+    ExplainResult,
     Finding,
     Report,
     Severity,
     Suggestion,
+    TokenUsage,
     VerifyMethod,
     VerifyStatus,
 )
@@ -68,9 +73,15 @@ def _status(suggestion: Suggestion) -> str:
     detail = escape(result.detail)
     if result.status == VerifyStatus.PASSED and result.method == VerifyMethod.PYTEST:
         return "[green]✓ testler geçti[/]"
+    if result.status == VerifyStatus.PASSED and result.method == VerifyMethod.BENCHMARK:
+        return "[green]✓ çıktı aynı, hızlanma ölçüldü[/]"
     if result.status == VerifyStatus.PASSED:
         return f"[yellow]⚠ doğrulanamadı (yalnız sözdizimi: {detail})[/]"
     return f"[yellow]⚠ doğrulanmadı ({detail})[/]"
+
+
+def _benchmark_line(bench: Benchmark) -> str:
+    return f"önce {bench.before_s:.3f}s → sonra {bench.after_s:.3f}s ({bench.speedup:.1f}x)"
 
 
 def _render_suggestion(console: Console, suggestion: Suggestion, diff_only: bool) -> None:
@@ -79,6 +90,8 @@ def _render_suggestion(console: Console, suggestion: Suggestion, diff_only: bool
         return
     console.print(f"    [bold]Öneri:[/] {escape(suggestion.explanation)}")
     _render_diff(console, suggestion, "    ")
+    if suggestion.benchmark is not None:
+        console.print(f"    [bold green]{_benchmark_line(suggestion.benchmark)}[/]")
     console.print(f"    {_status(suggestion)}")
 
 
@@ -123,6 +136,20 @@ def _totals(reports: Sequence[Report]) -> str:
     )
 
 
+def _render_messages(console: Console, run: AnalysisRun, verbose: bool) -> None:
+    for error in run.errors:
+        console.print(f"[red]{escape(error)}[/]")
+    for warning in run.warnings:
+        console.print(f"[yellow]{escape(warning)}[/]")
+    _render_hidden(console, run, verbose)
+    for skip in run.skipped:
+        console.print(f"[dim]atlandı: {escape(skip)}[/]")
+
+
+def _render_tokens(console: Console, usage: TokenUsage) -> None:
+    console.print(f"Token: giriş {usage.input_tokens}, çıkış {usage.output_tokens}")
+
+
 def render_reports(
     console: Console,
     run: AnalysisRun,
@@ -133,13 +160,7 @@ def render_reports(
 ) -> None:
     for report in run.reports:
         _render_report(console, report, cwd, diff_only)
-    for error in run.errors:
-        console.print(f"[red]{escape(error)}[/]")
-    for warning in run.warnings:
-        console.print(f"[yellow]{escape(warning)}[/]")
-    _render_hidden(console, run, verbose)
-    for skip in run.skipped:
-        console.print(f"[dim]atlandı: {escape(skip)}[/]")
+    _render_messages(console, run, verbose)
     if run.truncated:
         console.print(
             f"[yellow]{run.truncated} bulgu sınır nedeniyle gösterilmedi (--max-findings)[/]"
@@ -148,5 +169,59 @@ def render_reports(
         console.print("[green]Bulgu yok[/]")
     console.print(_totals(run.reports))
     if verbose:
-        usage = run.usage
-        console.print(f"Token: giriş {usage.input_tokens}, çıkış {usage.output_tokens}")
+        _render_tokens(console, run.usage)
+
+
+def _profile_table(run: AnalysisRun) -> Table:
+    table = Table(title="Profil (en çok süre alan 10 işlev)")
+    table.add_column("işlev")
+    for name in ("satır", "çağrı", "tottime (s)", "cumtime (s)"):
+        table.add_column(name, justify="right")
+    for entry in run.profile[:10]:
+        table.add_row(
+            escape(entry.function),
+            str(entry.line),
+            str(entry.calls),
+            f"{entry.tottime:.4f}",
+            f"{entry.cumtime:.4f}",
+        )
+    return table
+
+
+def render_optimize(
+    console: Console,
+    run: AnalysisRun,
+    cwd: Path,
+    *,
+    diff_only: bool = False,
+    verbose: bool = False,
+) -> None:
+    if run.profile:
+        console.print(_profile_table(run))
+    for report in run.reports:
+        name = escape(_display_path(report.file, cwd))
+        visible = report.visible_suggestions()
+        console.print(f"[bold]{name}[/] — {len(visible)} öneri")
+        for suggestion in visible:
+            _render_suggestion(console, suggestion, diff_only)
+    _render_messages(console, run, verbose)
+    if verbose:
+        _render_tokens(console, run.usage)
+
+
+def render_explain(console: Console, result: ExplainResult, *, verbose: bool = False) -> None:
+    explanation = result.explanation
+    if explanation is not None:
+        title = escape(result.file.name)
+        console.print(Panel(escape(explanation.summary), title=title, title_align="left"))
+        for unit in explanation.units:
+            console.print(f"[bold]{escape(unit.name)}[/]")
+            console.print(f"  {escape(unit.purpose)}")
+            for note in unit.notes:
+                console.print(f"    • {escape(note)}")
+    for error in result.errors:
+        console.print(f"[red]{escape(error)}[/]")
+    for warning in result.warnings:
+        console.print(f"[yellow]{escape(warning)}[/]")
+    if verbose:
+        _render_tokens(console, result.usage)

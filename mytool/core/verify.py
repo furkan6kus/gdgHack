@@ -18,6 +18,7 @@ from mytool.core.analyzers.ruff import RuffAnalyzer
 from mytool.core.config import Config
 from mytool.core.languages.base import LanguagePlugin
 from mytool.core.models import (
+    Benchmark,
     Finding,
     Patch,
     Severity,
@@ -26,6 +27,7 @@ from mytool.core.models import (
     VerifyStatus,
 )
 from mytool.core.patching import PatchError, apply_patch
+from mytool.core.profiling import Workload, WorkloadError, measure
 
 IGNORED_DIRS = (
     ".git",
@@ -46,6 +48,8 @@ _ROOT_MARKERS = ("pyproject.toml", "setup.cfg", "setup.py", ".git")
 _SECRET_WORDS = ("SECRET", "TOKEN", "PASSWORD", "API_KEY")
 _TAIL_LINES = 20
 _NO_TESTS_EXIT = 5
+MIN_SPEEDUP = 1.05
+BENCH_RUNS = 3
 
 
 def find_project_root(file: Path) -> Path:
@@ -131,6 +135,12 @@ class Workspace:
         if not _has_tests(self.root):
             self.tests_reason = "test yok"
 
+    def env(self) -> dict[str, str]:
+        """Filtered environment for running user code in this copy."""
+        env = _clean_env()
+        env["PYTHONPATH"] = str(self.root)
+        return env
+
     def path_for(self, original: Path) -> Path:
         copy = self.root / original.resolve().relative_to(self.project_root)
         if not copy.exists():
@@ -195,6 +205,12 @@ def _ensure_baseline(ws: Workspace, cfg: Config) -> None:
         ws.tests_reason = "test yok"
     elif run.outcome == "fail":
         ws.tests_reason = "testler patch öncesi de başarısız"
+
+
+def tests_usable(ws: Workspace, cfg: Config) -> bool:
+    """True when the project's tests exist and pass on the unpatched copy."""
+    _ensure_baseline(ws, cfg)
+    return ws.tests_available
 
 
 def _ruff_errors(path: Path, cfg: Config) -> list[Finding] | None:
@@ -274,3 +290,48 @@ def verify_patch(
     finally:
         target.write_bytes(original)
     return result.model_copy(update={"duration_s": time.perf_counter() - started})
+
+
+def _measure_after(
+    ws: Workspace,
+    cfg: Config,
+    workload: Workload,
+    before: tuple[float, str],
+    base: VerificationResult,
+) -> tuple[VerificationResult, Benchmark | None]:
+    """Time the (already patched) copy; reject changed output or no measurable speedup."""
+    try:
+        after_s, after_out = measure(ws, workload, cfg.subprocess_timeout_s, BENCH_RUNS)
+    except WorkloadError as exc:
+        return _failed(VerifyMethod.BENCHMARK, str(exc)), None
+    bench = Benchmark(before_s=before[0], after_s=after_s, runs=BENCH_RUNS)
+    if after_out != before[1]:
+        return _failed(VerifyMethod.BENCHMARK, "çıktı değişti"), bench
+    if bench.speedup < MIN_SPEEDUP:
+        detail = f"ölçülebilir hızlanma yok ({bench.speedup:.2f}x)"
+        return _failed(VerifyMethod.BENCHMARK, detail), bench
+    method = VerifyMethod.PYTEST if base.method == VerifyMethod.PYTEST else VerifyMethod.BENCHMARK
+    detail = f"önce {bench.before_s:.3f}s, sonra {bench.after_s:.3f}s ({bench.speedup:.1f}x)"
+    return _result(VerifyStatus.PASSED, method, detail), bench
+
+
+def verify_optimization(
+    ws: Workspace,
+    patch: Patch,
+    plugin: LanguagePlugin,
+    cfg: Config,
+    workload: Workload,
+    before: tuple[float, str],
+) -> tuple[VerificationResult, Benchmark | None]:
+    """verify_patch steps, then time the workload on the patched copy against `before`."""
+    started = time.perf_counter()
+    target = ws.path_for(patch.file)
+    original = target.read_bytes()
+    bench: Benchmark | None = None
+    try:
+        result = _verify(ws, target, patch, plugin, cfg)
+        if result.status == VerifyStatus.PASSED:
+            result, bench = _measure_after(ws, cfg, workload, before, result)
+    finally:
+        target.write_bytes(original)
+    return result.model_copy(update={"duration_s": time.perf_counter() - started}), bench

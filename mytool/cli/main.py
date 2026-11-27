@@ -6,6 +6,7 @@ import contextlib
 import io
 import json
 import sys
+from collections.abc import Callable
 from pathlib import Path
 from typing import Annotated
 
@@ -18,12 +19,12 @@ from rich.prompt import Confirm
 from mytool import __version__
 from mytool.cli import interact
 from mytool.cli.interact import _is_interactive
-from mytool.cli.render import render_reports
+from mytool.cli.render import render_explain, render_optimize, render_reports
 from mytool.core.apply import apply_suggestions, latest_backup, restore_backup
 from mytool.core.config import Config, has_api_key, load_config
 from mytool.core.llm import AnthropicLLM, LLMClient
 from mytool.core.models import AnalysisRun, ApplyResult
-from mytool.core.pipeline import analyze
+from mytool.core.pipeline import analyze, explain, optimize
 from mytool.core.verify import find_project_root
 
 app = typer.Typer(
@@ -118,11 +119,17 @@ NOTICE_TEXT = (
 )
 
 
-def _show_verify_notice(out: Console) -> None:
+OPTIMIZE_NOTICE_TEXT = (
+    "Profil ve ölçüm için benchmark betiği, projenin testleri veya dosyanın kendisi bu "
+    "makinede (sandbox yok) geçici bir kopyada çalıştırılır; --no-verify bunu engellemez."
+)
+
+
+def _show_verify_notice(out: Console, text: str = NOTICE_TEXT) -> None:
     marker = Path.home() / ".mytool" / "verify-notice"
     if marker.exists():
         return
-    out.print(Panel(NOTICE_TEXT, title="Uyarı", border_style="yellow"))
+    out.print(Panel(text, title="Uyarı", border_style="yellow"))
     with contextlib.suppress(OSError):
         marker.parent.mkdir(parents=True, exist_ok=True)
         marker.touch()
@@ -157,7 +164,26 @@ def analyze_command(
     if llm is not None and config.verify:
         _show_verify_notice(err_console)
     run = analyze(path, config, llm)
-    result: ApplyResult | None = None
+    _present(
+        run,
+        path,
+        json_out=json_out,
+        fix=fix,
+        no_verify=no_verify,
+        render=lambda: render_reports(console, run, Path.cwd(), diff_only=diff, verbose=verbose),
+    )
+
+
+def _present(
+    run: AnalysisRun,
+    path: Path,
+    *,
+    json_out: bool,
+    fix: bool,
+    no_verify: bool,
+    render: Callable[[], None],
+) -> None:
+    """Print the run (or JSON), run the apply flow, exit 3 on errors."""
     if json_out:
         result = _apply_fix(run, path, err_console, no_verify) if fix else None
         payload = {
@@ -166,7 +192,7 @@ def analyze_command(
         }
         typer.echo(json.dumps(payload, indent=2, ensure_ascii=False))
     else:
-        render_reports(console, run, Path.cwd(), diff_only=diff, verbose=verbose)
+        render()
         if fix:
             _apply_fix(run, path, console, no_verify)
         elif interact.selectable_pairs(run) and _is_interactive():
@@ -224,26 +250,67 @@ def undo(
         console.print(f"geri yüklendi: {escape(str(restored))}")
 
 
-@app.command()
-def optimize(
+def _require_file(path: Path) -> None:
+    if not path.exists():
+        err_console.print(f"[red]Error:[/] path not found: {path}")
+        raise typer.Exit(2)
+    if not path.is_file():
+        err_console.print(f"[red]Error:[/] bir dosya ver, dizin değil: {path}")
+        raise typer.Exit(2)
+
+
+def _require_api_key(command: str) -> None:
+    if not has_api_key():
+        err_console.print(f"[red]Error:[/] {command} için ANTHROPIC_API_KEY tanımlı olmalı")
+        raise typer.Exit(2)
+
+
+@app.command(name="optimize")
+def optimize_command(
     path: PathArg,
+    bench: Annotated[
+        Path | None,
+        typer.Option("--bench", help="Python script that exercises the code (the workload)."),
+    ] = None,
     diff: DiffOpt = False,
     fix: FixOpt = False,
     json_out: JsonOpt = False,
-    no_verify: NoVerifyOpt = False,
+    no_verify: Annotated[
+        bool,
+        typer.Option(
+            "--no-verify",
+            help="Skip patch verification. Profiling still runs the workload "
+            "(bench script, project tests or the file itself) on this machine.",
+        ),
+    ] = False,
     model: ModelOpt = None,
-    max_findings: MaxFindingsOpt = None,
+    max_tokens: MaxTokensOpt = None,
+    timeout: TimeoutOpt = None,
     verbose: VerboseOpt = False,
 ) -> None:
-    """Suggest performance optimizations."""
-    _prepare(
-        "optimize",
-        path,
-        6,
-        json_out=json_out,
-        no_verify=no_verify,
+    """Profile with cProfile and suggest measured speedups."""
+    _require_file(path)
+    if bench is not None and not bench.is_file():
+        err_console.print(f"[red]Error:[/] benchmark betiği bulunamadı: {bench}")
+        raise typer.Exit(2)
+    _require_api_key("optimize")
+    config = load_config(
         model=model,
-        max_findings=max_findings,
+        max_tokens_per_request=max_tokens,
+        verify=not no_verify,
+        subprocess_timeout_s=timeout,
+    )
+    out = err_console if json_out else console
+    out.print("[dim]Not: ilgili kod parçaları Anthropic API'ye gönderilir.[/]")
+    _show_verify_notice(err_console, OPTIMIZE_NOTICE_TEXT)
+    run = optimize(path, config, _make_llm(config), bench)
+    _present(
+        run,
+        path,
+        json_out=json_out,
+        fix=fix,
+        no_verify=no_verify,
+        render=lambda: render_optimize(console, run, Path.cwd(), diff_only=diff, verbose=verbose),
     )
 
 
@@ -294,24 +361,24 @@ def translate(
     )
 
 
-@app.command()
-def explain(
+@app.command(name="explain")
+def explain_command(
     path: PathArg,
-    diff: DiffOpt = False,
-    fix: FixOpt = False,
     json_out: JsonOpt = False,
-    no_verify: NoVerifyOpt = False,
     model: ModelOpt = None,
-    max_findings: MaxFindingsOpt = None,
+    max_tokens: MaxTokensOpt = None,
     verbose: VerboseOpt = False,
 ) -> None:
-    """Explain what the code does."""
-    _prepare(
-        "explain",
-        path,
-        6,
-        json_out=json_out,
-        no_verify=no_verify,
-        model=model,
-        max_findings=max_findings,
-    )
+    """Explain what a file does (in Turkish)."""
+    _require_file(path)
+    _require_api_key("explain")
+    config = load_config(model=model, max_tokens_per_request=max_tokens)
+    out = err_console if json_out else console
+    out.print("[dim]Not: dosyanın kodu Anthropic API'ye gönderilir.[/]")
+    result = explain(path, config, _make_llm(config))
+    if json_out:
+        typer.echo(json.dumps(result.model_dump(mode="json"), indent=2, ensure_ascii=False))
+    else:
+        render_explain(console, result, verbose=verbose)
+    if result.errors:
+        raise typer.Exit(3)

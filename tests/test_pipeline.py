@@ -1,12 +1,12 @@
-from collections.abc import Callable
 from pathlib import Path
 
 import pytest
+from fakes import FakeLLM, ParsedRequest
 
 from mytool.core.analyzers.base import AnalyzerError
 from mytool.core.config import Config
-from mytool.core.llm import LLMError, LLMFix, LLMRequest, LLMUnitResponse
-from mytool.core.models import Category, Finding, LineRange, Severity, TokenUsage, VerifyStatus
+from mytool.core.llm import LLMError, LLMFix, LLMUnitResponse
+from mytool.core.models import Category, Finding, LineRange, Severity, VerifyStatus
 from mytool.core.pipeline import analyze, analyze_static, collect_files
 from mytool.core.verify import Workspace
 
@@ -98,21 +98,6 @@ def test_analyzer_error_captured_and_clean_files_reported(tmp_path: Path) -> Non
     assert run.errors == ["failing: boom"]
 
 
-class FakeLLM:
-    """Calls handler(req); an Exception result is raised."""
-
-    def __init__(self, handler: Callable[[LLMRequest], LLMUnitResponse | Exception]) -> None:
-        self.handler = handler
-        self.requests: list[LLMRequest] = []
-
-    def suggest(self, req: LLMRequest) -> tuple[LLMUnitResponse, TokenUsage]:
-        self.requests.append(req)
-        result = self.handler(req)
-        if isinstance(result, Exception):
-            raise result
-        return result, TokenUsage(input_tokens=10, output_tokens=2)
-
-
 def _fix(ids: list[str], original: str = "", replacement: str = "") -> LLMFix:
     return LLMFix(
         finding_ids=ids,
@@ -177,7 +162,7 @@ def test_patch_mismatch_recorded_and_run_continues(tmp_path: Path) -> None:
     a, b = _two_files(tmp_path)
     analyzer = FakeAnalyzer([_finding(a, 1), _finding(b, 1)])
 
-    def handler(r: LLMRequest) -> LLMUnitResponse:
+    def handler(r: ParsedRequest) -> LLMUnitResponse:
         original = "zzz" if r.file_name == "a.py" else "import sys\n"
         return LLMUnitResponse(fixes=[_fix([r.findings[0].id], original, "")])
 

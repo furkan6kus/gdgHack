@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import re
 from collections import defaultdict
 from collections.abc import Iterator, Sequence
 from contextlib import ExitStack
@@ -14,33 +15,60 @@ from mytool.core.analyzers.base import Analyzer, AnalyzerError
 from mytool.core.analyzers.ruff import RuffAnalyzer
 from mytool.core.config import Config, is_denied
 from mytool.core.languages import plugin_for
+from mytool.core.languages.base import LanguagePlugin
 from mytool.core.llm import (
     LLMClient,
     LLMError,
     LLMFindingRef,
     LLMFix,
     LLMRequest,
+    LLMUnitResponse,
     number_lines,
 )
 from mytool.core.models import (
     AnalysisRun,
+    Category,
     CodeUnit,
+    ExplainResult,
+    FileExplanation,
     Finding,
+    ProfileEntry,
     Report,
     Severity,
     Suggestion,
+    UnitExplanation,
     VerificationResult,
     VerifyMethod,
     VerifyStatus,
 )
 from mytool.core.parser import unit_for_line
 from mytool.core.patching import PatchError, build_patch
-from mytool.core.verify import Workspace, find_project_root, verify_patch
+from mytool.core.profiling import Workload, WorkloadError, hot_units, measure, profile
+from mytool.core.prompts import (
+    EXPLAIN_SYSTEM,
+    FIX_SYSTEM,
+    OPTIMIZE_SYSTEM,
+    build_explain_prompt,
+    build_fix_prompt,
+    build_optimize_prompt,
+    build_summary_prompt,
+    build_unit_prompt,
+)
+from mytool.core.verify import (
+    Workspace,
+    find_project_root,
+    tests_usable,
+    verify_optimization,
+    verify_patch,
+)
 
 SKIP_DIRS = frozenset(
     {".git", ".venv", "venv", "node_modules", "__pycache__", ".mytool", "build", "dist"}
 )
 WINDOW = 15
+EXPLAIN_WHOLE_FILE_LINES = 400
+NO_PROFILE_DATA = "profil verisi yok: --bench ile bir benchmark betiği ver"
+_MAIN_GUARD = re.compile(r"^if\s+__name__\s*==\s*[\"']__main__[\"']\s*:", re.MULTILINE)
 _SEVERITY_ORDER = {Severity.ERROR: 0, Severity.WARNING: 1, Severity.INFO: 2}
 
 
@@ -199,7 +227,9 @@ def _suggestion(
     try:
         patch = build_patch(source, path, group.start, fix)
     except PatchError as exc:
-        error = f"{path.name}: patch eşleşmedi ({exc}): {', '.join(fix.finding_ids)}"
+        error = f"{path.name}: patch eşleşmedi ({exc})"
+        if fix.finding_ids:
+            error += f": {', '.join(fix.finding_ids)}"
     suggestion = Suggestion(
         id=f"sug-{next(ids)}",
         finding_ids=fix.finding_ids,
@@ -213,7 +243,8 @@ def _suggestion(
 def _handle_group(
     run: AnalysisRun, report: Report, group: _Group, source: str, llm: LLMClient, ids: Iterator[int]
 ) -> None:
-    response, usage = llm.suggest(_request(report.file, group, source))
+    prompt = build_fix_prompt(_request(report.file, group, source))
+    response, usage = llm.structured(FIX_SYSTEM, prompt, LLMUnitResponse)
     report.usage = report.usage.add(usage)
     known = {f.id for f in group.findings}
     for fix in response.fixes:
@@ -299,4 +330,235 @@ def analyze(
         if report.findings and not _suggest_for_report(run, report, llm, ids):
             break
     _verify_suggestions(run, cfg)
+    return run
+
+
+def _top_level(units: list[CodeUnit]) -> list[CodeUnit]:
+    return [
+        u
+        for u in units
+        if not any(
+            o is not u and o.lines.start <= u.lines.start and u.lines.end <= o.lines.end
+            for o in units
+        )
+    ]
+
+
+def _unit_code(text: str, unit: CodeUnit) -> str:
+    lines = text.splitlines(keepends=True)
+    return "".join(lines[unit.lines.start - 1 : unit.lines.end])
+
+
+def _explain_units(
+    result: ExplainResult, llm: LLMClient, plugin: LanguagePlugin, text: str
+) -> list[UnitExplanation]:
+    name = result.file.name
+    explained: list[UnitExplanation] = []
+    for unit in _top_level(plugin.extract_units(text)):
+        code = number_lines(_unit_code(text, unit), unit.lines.start)
+        prompt = build_unit_prompt(name, plugin.name, unit.name, code)
+        try:
+            answer, usage = llm.structured(EXPLAIN_SYSTEM, prompt, UnitExplanation)
+        except LLMError as exc:
+            (result.errors if exc.fatal else result.warnings).append(f"{name}: {unit.name}: {exc}")
+            if exc.fatal:
+                break
+            continue
+        result.usage = result.usage.add(usage)
+        explained.append(answer.model_copy(update={"name": unit.name}))
+    return explained
+
+
+def _explain_large(
+    result: ExplainResult, llm: LLMClient, plugin: LanguagePlugin, text: str
+) -> FileExplanation | None:
+    name = result.file.name
+    explained = _explain_units(result, llm, plugin, text)
+    if not explained:
+        result.errors.append(f"{name}: hiçbir birim açıklanamadı")
+        return None
+    purposes = [(u.name, u.purpose) for u in explained]
+    try:
+        answer, usage = llm.structured(
+            EXPLAIN_SYSTEM, build_summary_prompt(name, purposes), FileExplanation
+        )
+    except LLMError as exc:
+        result.warnings.append(f"{name}: özet üretilemedi: {exc}")
+        return FileExplanation(summary="", units=explained)
+    result.usage = result.usage.add(usage)
+    return FileExplanation(summary=answer.summary, units=explained)
+
+
+def _explain_whole(
+    result: ExplainResult, llm: LLMClient, plugin: LanguagePlugin, text: str
+) -> FileExplanation | None:
+    name = result.file.name
+    prompt = build_explain_prompt(name, plugin.name, number_lines(text, 1))
+    try:
+        answer, usage = llm.structured(EXPLAIN_SYSTEM, prompt, FileExplanation)
+    except LLMError as exc:
+        result.errors.append(f"{name}: {exc}")
+        return None
+    result.usage = result.usage.add(usage)
+    return answer
+
+
+def explain(file: Path, cfg: Config, llm: LLMClient) -> ExplainResult:
+    result = ExplainResult(file=file)
+    plugin = plugin_for(file)
+    if is_denied(file, cfg.deny_patterns):
+        result.errors.append(f"{file.name}: deny-list, dosya LLM'e gönderilmez")
+    elif plugin is None:
+        result.errors.append(f"{file.name}: desteklenmeyen dil")
+    else:
+        text = file.read_text(encoding="utf-8", errors="replace")
+        if len(text.splitlines()) <= EXPLAIN_WHOLE_FILE_LINES:
+            result.explanation = _explain_whole(result, llm, plugin, text)
+        else:
+            result.explanation = _explain_large(result, llm, plugin, text)
+    return result
+
+
+def _select_workload(ws: Workspace, file: Path, bench: Path | None, cfg: Config) -> Workload | None:
+    """--bench script, else project tests, else the file itself when it has a main guard."""
+    if bench is not None:
+        if not bench.resolve().is_relative_to(ws.project_root):
+            raise WorkloadError(f"benchmark betiği proje dışında: {bench}")
+        return Workload(script=ws.path_for(bench))
+    if tests_usable(ws, cfg):
+        return Workload()
+    if _MAIN_GUARD.search(file.read_text(encoding="utf-8", errors="replace")):
+        return Workload(script=ws.path_for(file))
+    return None
+
+
+def _suggest_for_unit(
+    run: AnalysisRun,
+    report: Report,
+    unit: CodeUnit,
+    source: str,
+    llm: LLMClient,
+    ids: Iterator[int],
+    total_s: float,
+    entries: list[ProfileEntry],
+) -> bool:
+    """Returns False after a fatal LLM error."""
+    code = _unit_code(source, unit)
+    own = [e for e in entries if unit.lines.start <= e.line <= unit.lines.end]
+    prompt = build_optimize_prompt(
+        report.file.name,
+        "python",
+        unit.name,
+        unit.lines.start,
+        number_lines(code, unit.lines.start),
+        own,
+        total_s,
+    )
+    try:
+        response, usage = llm.structured(OPTIMIZE_SYSTEM, prompt, LLMUnitResponse)
+    except LLMError as exc:
+        (run.errors if exc.fatal else run.warnings).append(f"{report.file.name}: {exc}")
+        return not exc.fatal
+    report.usage = report.usage.add(usage)
+    group = _Group(unit.name, unit.lines.start, unit.lines.end, [])
+    for fix in response.fixes:
+        perf_fix = fix.model_copy(update={"category": Category.PERF})
+        suggestion, error = _suggestion(ids, report.file, group, code, perf_fix)
+        report.suggestions.append(suggestion)
+        if error:
+            run.warnings.append(error)
+    return True
+
+
+def _verify_optimization(
+    run: AnalysisRun,
+    ws: Workspace,
+    report: Report,
+    suggestion: Suggestion,
+    plugin: LanguagePlugin,
+    cfg: Config,
+    workload: Workload,
+    before: tuple[float, str],
+) -> Suggestion:
+    assert suggestion.patch is not None
+    try:
+        result, bench = verify_optimization(ws, suggestion.patch, plugin, cfg, workload, before)
+    except OSError as exc:
+        run.warnings.append(f"{report.file.name}: doğrulama altyapısı hatası: {exc}")
+        result = VerificationResult(
+            status=VerifyStatus.SKIPPED,
+            method=VerifyMethod.NONE,
+            detail=f"doğrulama yapılamadı: {exc}",
+        )
+        bench = None
+    return suggestion.model_copy(update={"verification": result, "benchmark": bench})
+
+
+def _verify_all(
+    run: AnalysisRun,
+    ws: Workspace,
+    report: Report,
+    plugin: LanguagePlugin,
+    cfg: Config,
+    workload: Workload,
+    before: tuple[float, str] | None,
+) -> None:
+    skipped = VerificationResult(
+        status=VerifyStatus.SKIPPED, method=VerifyMethod.NONE, detail="--no-verify"
+    )
+    for index, suggestion in enumerate(report.suggestions):
+        if suggestion.patch is None:
+            continue
+        if before is None:
+            report.suggestions[index] = suggestion.model_copy(update={"verification": skipped})
+        else:
+            report.suggestions[index] = _verify_optimization(
+                run, ws, report, suggestion, plugin, cfg, workload, before
+            )
+
+
+def _optimize_in(
+    ws: Workspace,
+    run: AnalysisRun,
+    report: Report,
+    plugin: LanguagePlugin,
+    cfg: Config,
+    llm: LLMClient,
+    bench: Path | None,
+) -> None:
+    workload = _select_workload(ws, report.file, bench, cfg)
+    if workload is None:
+        run.errors.append(NO_PROFILE_DATA)
+        return
+    entries, total_s = profile(ws, workload, ws.path_for(report.file), cfg.subprocess_timeout_s)
+    run.profile = entries
+    source = report.file.read_text(encoding="utf-8", errors="replace")
+    hot = hot_units(entries, total_s, plugin.extract_units(source))
+    if not hot:
+        run.warnings.append("profilde belirgin sıcak nokta yok")
+        return
+    before = measure(ws, workload, cfg.subprocess_timeout_s) if cfg.verify else None
+    ids = count(1)
+    for unit in hot:
+        if not _suggest_for_unit(run, report, unit, source, llm, ids, total_s, entries):
+            break
+    _verify_all(run, ws, report, plugin, cfg, workload, before)
+
+
+def optimize(file: Path, cfg: Config, llm: LLMClient, bench: Path | None = None) -> AnalysisRun:
+    """Profile a workload, ask the LLM about the hot units, keep only measured speedups."""
+    run = AnalysisRun()
+    plugin = plugin_for(file)
+    if is_denied(file, cfg.deny_patterns):
+        run.errors.append(f"{file.name}: deny-list, dosya işlenmedi")
+    elif plugin is None:
+        run.errors.append(f"{file.name}: desteklenmeyen dil")
+    else:
+        report = Report(file=file, content_sha256=hashlib.sha256(file.read_bytes()).hexdigest())
+        run.reports.append(report)
+        try:
+            with Workspace(find_project_root(file)) as ws:
+                _optimize_in(ws, run, report, plugin, cfg, llm, bench)
+        except (WorkloadError, OSError) as exc:
+            run.errors.append(f"{file.name}: {exc}")
     return run

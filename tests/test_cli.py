@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from fakes import FakeLLM, ParsedRequest
 from typer.testing import CliRunner
 
 from mytool import __version__
@@ -13,7 +14,7 @@ from mytool.cli import main as cli_main
 from mytool.cli.main import app
 from mytool.core.analyzers.base import AnalyzerError
 from mytool.core.config import Config
-from mytool.core.llm import LLMClient, LLMFix, LLMRequest, LLMUnitResponse
+from mytool.core.llm import LLMClient, LLMFix, LLMUnitResponse
 from mytool.core.models import (
     AnalysisRun,
     Category,
@@ -22,7 +23,6 @@ from mytool.core.models import (
     Patch,
     Report,
     Suggestion,
-    TokenUsage,
     VerificationResult,
     VerifyMethod,
     VerifyStatus,
@@ -125,30 +125,31 @@ def test_force_utf8_reconfigures(monkeypatch: pytest.MonkeyPatch) -> None:
     assert buf.encoding == "utf-8"
 
 
-class FakeLLM:
+class Counter:
     calls = 0
 
-    def suggest(self, req: LLMRequest) -> tuple[LLMUnitResponse, TokenUsage]:
-        FakeLLM.calls += 1
-        fixes = [
-            LLMFix(
-                finding_ids=[f.id],
-                category=Category.STYLE,
-                explanation="kullanilmayan import kaldirilmali",
-                original="import os\n",
-                replacement="",
-            )
-            for f in req.findings
-            if f.rule == "F401"
-        ]
-        return LLMUnitResponse(fixes=fixes), TokenUsage(input_tokens=123, output_tokens=45)
+
+def _removes_unused_import(req: ParsedRequest) -> LLMUnitResponse:
+    Counter.calls += 1
+    fixes = [
+        LLMFix(
+            finding_ids=[f.id],
+            category=Category.STYLE,
+            explanation="kullanilmayan import kaldirilmali",
+            original="import os\n",
+            replacement="",
+        )
+        for f in req.findings
+        if f.rule == "F401"
+    ]
+    return LLMUnitResponse(fixes=fixes)
 
 
 @pytest.fixture
 def llm_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    FakeLLM.calls = 0
+    Counter.calls = 0
     monkeypatch.setattr(cli_main, "has_api_key", lambda: True)
-    monkeypatch.setattr(cli_main, "_make_llm", lambda cfg: FakeLLM())
+    monkeypatch.setattr(cli_main, "_make_llm", lambda cfg: FakeLLM(_removes_unused_import))
 
 
 def test_no_api_key_falls_back_to_static(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -190,7 +191,7 @@ def test_verbose_shows_tokens() -> None:
 def test_static_flag_never_calls_llm() -> None:
     result = runner.invoke(app, ["analyze", str(FIXTURE), "--static"])
     assert result.exit_code == 0
-    assert FakeLLM.calls == 0
+    assert Counter.calls == 0
     assert "kullanilmayan" not in result.output
     assert "Anthropic API" not in result.output
 
@@ -202,26 +203,25 @@ def test_json_includes_suggestions() -> None:
     assert data["run"]["reports"][0]["suggestions"][0]["verification"]["status"] == "skipped"
 
 
-class ScriptedLLM:
+def _scripted_llm(original: str, replacement: str) -> FakeLLM:
     """Fix for the first finding of every request: replace original with replacement."""
 
-    def __init__(self, original: str, replacement: str) -> None:
-        self.original, self.replacement = original, replacement
-
-    def suggest(self, req: LLMRequest) -> tuple[LLMUnitResponse, TokenUsage]:
+    def handler(req: ParsedRequest) -> LLMUnitResponse:
         fix = LLMFix(
             finding_ids=[req.findings[0].id],
             category=Category.STYLE,
             explanation="açıklama",
-            original=self.original,
-            replacement=self.replacement,
+            original=original,
+            replacement=replacement,
         )
-        return LLMUnitResponse(fixes=[fix]), TokenUsage()
+        return LLMUnitResponse(fixes=[fix])
+
+    return FakeLLM(handler)
 
 
 def _scripted(monkeypatch: pytest.MonkeyPatch, original: str, replacement: str) -> None:
     monkeypatch.setattr(cli_main, "has_api_key", lambda: True)
-    monkeypatch.setattr(cli_main, "_make_llm", lambda cfg: ScriptedLLM(original, replacement))
+    monkeypatch.setattr(cli_main, "_make_llm", lambda cfg: _scripted_llm(original, replacement))
 
 
 def _tmp_project(root: Path) -> Path:

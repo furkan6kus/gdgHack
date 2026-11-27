@@ -20,9 +20,9 @@ from mytool.core.llm import (
     LLMRequest,
     LLMUnitResponse,
     number_lines,
-    render_request,
 )
-from mytool.core.models import Category
+from mytool.core.models import Category, FileExplanation
+from mytool.core.prompts import FIX_SYSTEM, build_fix_prompt
 
 REQ = LLMRequest(
     file_name="a.py",
@@ -32,6 +32,8 @@ REQ = LLMRequest(
     code="1 | import os",
     findings=[LLMFindingRef("f1", "F401", 1, "unused")],
 )
+SYSTEM = FIX_SYSTEM
+PROMPT = build_fix_prompt(REQ)
 GOOD = LLMUnitResponse(
     fixes=[
         LLMFix(
@@ -80,11 +82,13 @@ def _sdk_error(cls: type[Exception], status: int) -> Exception:
 
 def test_success_returns_parsed_and_usage() -> None:
     llm, client = _llm(_response(GOOD))
-    parsed, usage = llm.suggest(REQ)
+    parsed, usage = llm.structured(SYSTEM, PROMPT, LLMUnitResponse)
     assert parsed == GOOD
     assert (usage.input_tokens, usage.output_tokens) == (10, 5)
     call = client.calls[0]
     assert call["model"] == "claude-sonnet-5-5"
+    assert call["system"] == SYSTEM
+    assert call["messages"] == [{"role": "user", "content": PROMPT}]
     assert call["output_config"] == {"effort": "medium"}
     assert call["output_format"] is LLMUnitResponse
     for banned in ("temperature", "top_p", "top_k", "thinking"):
@@ -93,7 +97,7 @@ def test_success_returns_parsed_and_usage() -> None:
 
 def test_retry_once_on_none_then_success() -> None:
     llm, client = _llm(_response(None), _response(GOOD))
-    parsed, usage = llm.suggest(REQ)
+    parsed, usage = llm.structured(SYSTEM, PROMPT, LLMUnitResponse)
     assert parsed == GOOD
     assert len(client.calls) == 2
     assert usage.input_tokens == 20
@@ -103,27 +107,27 @@ def test_retry_on_validation_error() -> None:
     with pytest.raises(Exception) as info:
         LLMUnitResponse.model_validate({"fixes": "x"})
     llm, client = _llm(info.value, _response(GOOD))
-    assert llm.suggest(REQ)[0] == GOOD
+    assert llm.structured(SYSTEM, PROMPT, LLMUnitResponse)[0] == GOOD
     assert len(client.calls) == 2
 
 
 def test_two_failures_raise() -> None:
     llm, client = _llm(_response(None), _response(None))
     with pytest.raises(LLMError, match="geçersiz JSON"):
-        llm.suggest(REQ)
+        llm.structured(SYSTEM, PROMPT, LLMUnitResponse)
     assert len(client.calls) == 2
 
 
 def test_refusal() -> None:
     llm, _ = _llm(_response(None, "refusal"))
     with pytest.raises(LLMError, match="reddetti"):
-        llm.suggest(REQ)
+        llm.structured(SYSTEM, PROMPT, LLMUnitResponse)
 
 
 def test_max_tokens() -> None:
     llm, _ = _llm(_response(None, "max_tokens"))
     with pytest.raises(LLMError, match="--max-tokens"):
-        llm.suggest(REQ)
+        llm.structured(SYSTEM, PROMPT, LLMUnitResponse)
 
 
 @pytest.mark.parametrize(
@@ -143,12 +147,21 @@ def test_max_tokens() -> None:
 def test_error_mapping(error: Exception, text: str, fatal: bool) -> None:
     llm, _ = _llm(error)
     with pytest.raises(LLMError, match=text) as info:
-        llm.suggest(REQ)
+        llm.structured(SYSTEM, PROMPT, LLMUnitResponse)
     assert info.value.fatal is fatal
 
 
 def test_prompt_rendering() -> None:
     assert number_lines("a\nb", 9) == " 9 | a\n10 | b"
-    text = render_request(REQ)
+    text = build_fix_prompt(REQ)
     assert "a.py" in text
     assert "id=f1" in text
+
+
+def test_schema_is_generic() -> None:
+    answer = FileExplanation(summary="s", units=[])
+    llm, client = _llm(_response(answer))
+    parsed, _ = llm.structured("sys", "prompt", FileExplanation)
+    assert parsed == answer
+    assert client.calls[0]["output_format"] is FileExplanation
+    assert client.calls[0]["system"] == "sys"

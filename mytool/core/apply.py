@@ -32,7 +32,7 @@ def fix_eligible(s: Suggestion) -> bool:
         s.patch is not None
         and v is not None
         and v.status == VerifyStatus.PASSED
-        and v.method == VerifyMethod.PYTEST
+        and v.method in (VerifyMethod.PYTEST, VerifyMethod.BENCHMARK)
     )
 
 
