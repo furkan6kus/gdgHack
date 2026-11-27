@@ -1,0 +1,109 @@
+"""Data contract shared between the UI server and the core.
+
+TEMPORARY – replace with core.models when available.
+
+These models mirror the mytool spec exactly. Once ``core/models.py`` exists,
+delete this module and re-export from ``core.models`` instead, e.g.::
+
+    from core.models import Finding, Patch, ...  # noqa: F401
+"""
+
+from __future__ import annotations
+
+import difflib
+from typing import Literal
+
+from pydantic import BaseModel, Field
+
+Severity = Literal["error", "warning", "info"]
+Category = Literal["bug", "perf", "style", "shrink", "translate"]
+VerificationStatus = Literal["passed", "failed", "skipped"]
+Stage = Literal["parsing", "static_analysis", "llm", "verify", "done", "error"]
+
+
+class Finding(BaseModel):
+    """A real finding produced by a static analyzer (e.g. ruff)."""
+
+    id: str
+    tool: str
+    file: str
+    line_start: int
+    line_end: int
+    severity: Severity
+    rule_code: str
+    message: str
+
+
+class Patch(BaseModel):
+    """A text replacement proposed for a single file."""
+
+    file: str
+    original_text: str
+    new_text: str
+
+    def unified_diff(self, context: int = 3) -> str:
+        """Return a unified diff between ``original_text`` and ``new_text``."""
+        lines = difflib.unified_diff(
+            self.original_text.splitlines(keepends=True),
+            self.new_text.splitlines(keepends=True),
+            fromfile=f"a/{self.file}",
+            tofile=f"b/{self.file}",
+            n=context,
+        )
+        return "".join(lines)
+
+
+class VerificationResult(BaseModel):
+    """Outcome of applying a patch to a temp copy and running checks."""
+
+    status: VerificationStatus
+    detail: str
+    duration_ms: int
+
+
+class Suggestion(BaseModel):
+    """An LLM explanation plus a verified patch for one or more findings."""
+
+    id: str
+    finding_ids: list[str]
+    category: Category
+    explanation: str
+    # UI addition (not in the spec yet, see docs/ui-core-requests.md §10): a short
+    # human-readable title for list rows. The UI falls back to the finding message.
+    title: str | None = None
+    patch: Patch
+    verification: VerificationResult
+
+
+class SeverityCounts(BaseModel):
+    error: int = 0
+    warning: int = 0
+    info: int = 0
+
+
+class FileSummary(BaseModel):
+    path: str
+    line_count: int
+    counts: SeverityCounts = Field(default_factory=SeverityCounts)
+
+
+class TokenUsage(BaseModel):
+    input_tokens: int = 0
+    output_tokens: int = 0
+
+
+class AnalyzeResult(BaseModel):
+    """UI-level result of an ``analyze`` run."""
+
+    root: str
+    files: list[FileSummary]
+    findings: list[Finding]
+    suggestions: list[Suggestion]
+    token_usage: TokenUsage = Field(default_factory=TokenUsage)
+
+
+class ProgressEvent(BaseModel):
+    stage: Stage
+    message: str
+    current: int | None = None
+    total: int | None = None

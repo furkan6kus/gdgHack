@@ -1,0 +1,838 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Kule · AI Ajanı Takip Paneli</title>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap"
+    rel="stylesheet"
+  />
+
+  <script src="https://cdn.tailwindcss.com/3.4.16"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Inter', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+            mono: ['"JetBrains Mono"', 'ui-monospace', 'SFMono-Regular', 'monospace'],
+          },
+          colors: {
+            base: '#0B0F17',
+            card: '#131822',
+            line: '#1F2937',
+          },
+        },
+      },
+    };
+  </script>
+
+  <style>
+    html { background: #0B0F17; }
+    body { font-feature-settings: 'cv11', 'ss01'; -webkit-font-smoothing: antialiased; }
+
+    /* Card enters / changes state */
+    @keyframes cardIn {
+      from { opacity: 0; transform: translateY(6px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    .card-enter { animation: cardIn .35s ease-out; }
+
+    /* Soft moving sheen on the running progress bar */
+    .progress-bar { position: relative; overflow: hidden; transition: width .8s cubic-bezier(.22, 1, .36, 1); }
+    .progress-bar::after {
+      content: '';
+      position: absolute; inset: 0;
+      background: linear-gradient(90deg, transparent, rgba(255, 255, 255, .35), transparent);
+      transform: translateX(-100%);
+      animation: sheen 1.8s ease-in-out infinite;
+    }
+    @keyframes sheen { to { transform: translateX(100%); } }
+
+    /* Short highlight when the saved-time counter ticks */
+    @keyframes bump {
+      0% { color: #6ee7b7; }
+      100% { color: inherit; }
+    }
+    .bump { animation: bump 1.2s ease-out; }
+
+    @media (prefers-reduced-motion: reduce) {
+      .card-enter, .progress-bar::after, .bump { animation: none; }
+      .progress-bar { transition: none; }
+    }
+  </style>
+</head>
+
+<body class="min-h-screen bg-base font-sans text-slate-300">
+  <!-- ============================== HEADER ============================== -->
+  <header class="border-b border-line/80">
+    <div class="mx-auto flex max-w-7xl flex-col gap-5 px-4 py-6 sm:px-6 lg:flex-row lg:items-center lg:justify-between lg:px-8">
+      <div>
+        <div class="flex items-center gap-3">
+          <span class="relative flex h-2.5 w-2.5">
+            <span class="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-60"></span>
+            <span class="relative inline-flex h-2.5 w-2.5 rounded-full bg-emerald-400 shadow-[0_0_12px_2px_rgba(52,211,153,0.55)]"></span>
+          </span>
+          <h1 class="text-2xl font-extrabold tracking-[0.18em] text-slate-50">KULE</h1>
+        </div>
+        <p class="mt-1 text-sm text-slate-500">Çoklu Proje &amp; AI Ajanı Takip Paneli</p>
+      </div>
+
+      <div class="flex flex-wrap items-center gap-2">
+        <span class="inline-flex items-center gap-2 rounded-full border border-line bg-card px-3 py-1.5 text-sm">
+          <span class="h-2 w-2 rounded-full bg-sky-400"></span>
+          Aktif Projeler: <b id="stat-active" class="font-semibold text-slate-100">3</b>
+        </span>
+        <span class="inline-flex items-center gap-2 rounded-full border border-line bg-card px-3 py-1.5 text-sm">
+          <span class="h-2 w-2 rounded-full bg-amber-400"></span>
+          Beni Bekleyenler: <b id="stat-waiting" class="font-semibold text-slate-100">1</b>
+        </span>
+        <span class="inline-flex items-center gap-2 rounded-full border border-line bg-card px-3 py-1.5 text-sm">
+          <span class="h-2 w-2 rounded-full bg-rose-400"></span>
+          Hatalar: <b id="stat-errors" class="font-semibold text-slate-100">1</b>
+        </span>
+        <span class="inline-flex items-center gap-2 rounded-full border border-line bg-card px-3 py-1.5 text-sm">
+          <span aria-hidden="true">🕒</span>
+          Kazanılan Süre: <b id="stat-saved" class="font-semibold text-emerald-300">+28 dk</b>
+        </span>
+        <button
+          id="sound-toggle"
+          type="button"
+          aria-pressed="true"
+          class="inline-flex items-center gap-2 rounded-full border border-line bg-card px-3 py-1.5 text-sm font-medium text-slate-200 transition hover:border-slate-600 hover:bg-white/[0.04] focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500/60"
+        >
+          Ses: Açık 🔊
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- ============================== GRID ============================== -->
+  <main class="mx-auto max-w-7xl px-4 pb-28 pt-8 sm:px-6 lg:px-8">
+    <div id="grid" class="grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-3"></div>
+
+    <footer class="mt-8 flex flex-col gap-2 text-xs text-slate-500 sm:flex-row sm:items-center sm:justify-between">
+      <p>
+        Kısayollar:
+        <kbd class="rounded border border-line bg-card px-1.5 py-0.5 font-sans text-slate-300">1</kbd>
+        <kbd class="rounded border border-line bg-card px-1.5 py-0.5 font-sans text-slate-300">2</kbd>
+        <kbd class="rounded border border-line bg-card px-1.5 py-0.5 font-sans text-slate-300">3</kbd>
+        kartı seç ·
+        <kbd class="rounded border border-line bg-card px-1.5 py-0.5 font-sans text-slate-300">Y</kbd>
+        bekleyen işi onayla ·
+        <kbd class="rounded border border-line bg-card px-1.5 py-0.5 font-sans text-slate-300">Esc</kbd>
+        seçimi kaldır
+      </p>
+      <p class="inline-flex items-center gap-2">
+        <span id="conn-dot" class="h-1.5 w-1.5 rounded-full bg-slate-600"></span>
+        <span id="conn-label">Sunucuya bağlanılıyor…</span>
+      </p>
+    </footer>
+  </main>
+
+  <!-- ============================== DEMO PANEL ============================== -->
+  <aside
+    id="demo-panel"
+    class="fixed bottom-4 right-4 z-40 w-[min(27rem,calc(100vw-2rem))] overflow-hidden rounded-2xl border border-line bg-card/95 shadow-2xl shadow-black/50 backdrop-blur"
+  >
+    <button
+      id="demo-toggle"
+      type="button"
+      aria-expanded="true"
+      class="flex w-full items-center justify-between px-4 py-3 text-left text-sm font-semibold text-slate-100 transition hover:bg-white/[0.03]"
+    >
+      <span class="inline-flex items-center gap-2">
+        <span class="h-1.5 w-1.5 rounded-full bg-violet-400"></span>
+        Demo Kontrol Paneli
+      </span>
+      <svg id="demo-chevron" class="h-4 w-4 text-slate-500 transition-transform" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+        <path fill-rule="evenodd" d="M5.23 12.79a.75.75 0 0 0 1.06-.02L10 8.84l3.71 3.93a.75.75 0 1 0 1.08-1.04l-4.25-4.5a.75.75 0 0 0-1.08 0l-4.25 4.5a.75.75 0 0 0 .02 1.06Z" clip-rule="evenodd" />
+      </svg>
+    </button>
+    <div id="demo-body" class="max-h-[60vh] space-y-3 overflow-y-auto border-t border-line px-4 py-4"></div>
+  </aside>
+
+  <!-- ============================== TOAST ============================== -->
+  <div
+    id="toast"
+    role="status"
+    aria-live="polite"
+    class="pointer-events-none fixed left-1/2 top-4 z-50 -translate-x-1/2 -translate-y-2 rounded-xl border border-line bg-card px-4 py-2.5 text-sm text-slate-200 opacity-0 shadow-xl shadow-black/40 transition duration-200"
+  ></div>
+
+  <script>
+    'use strict';
+
+    /* ------------------------------------------------------------------
+     * WebSocket protocol (server -> client), all fields optional except id:
+     *   { type: 'snapshot', projects: [ProjectPatch, ...] }
+     *   { type: 'update',   project: ProjectPatch }
+     *   { type: 'stats',    savedMinutes: number }
+     * ProjectPatch: { id, name?, state?, progress?, task?, lastChange?,
+     *                 message?, summary?, error?: {file, line, message}, resume?: string[] }
+     *
+     * Client -> server:
+     *   { type: 'action', projectId, command: 'approve' | 'reject' | 'autofix' }
+     * ------------------------------------------------------------------ */
+
+    // ---------- Config ----------
+    const TICK_MS = 900;                 // progress simulation step
+    const SAVED_TIME_STEP_MS = 30000;    // +1 minute "saved time" while an agent is working
+    const STATES = ['running', 'waiting', 'done', 'error'];
+
+    const STATE_META = {
+      running: {
+        label: 'YAPAY ZEKA ÇALIŞIYOR',
+        demoLabel: 'Çalışıyor',
+        pill: 'bg-sky-500/10 text-sky-300 ring-sky-500/25',
+        dot: 'bg-sky-400 animate-pulse',
+        card: '',
+      },
+      waiting: {
+        label: 'ONAY BEKLİYOR',
+        demoLabel: 'Onay Bekliyor',
+        pill: 'bg-amber-500/10 text-amber-300 ring-amber-500/30 shadow-[0_0_18px_-2px_rgba(245,158,11,0.45)]',
+        dot: 'bg-amber-400',
+        card: 'border-amber-500/25',
+      },
+      done: {
+        label: 'TAMAMLANDI',
+        demoLabel: 'Tamamlandı',
+        pill: 'bg-emerald-500/10 text-emerald-300 ring-emerald-500/25',
+        dot: 'bg-emerald-400',
+        card: '',
+      },
+      error: {
+        label: 'HATA / DOKTOR TEŞHİSİ',
+        demoLabel: 'Hata',
+        pill: 'bg-rose-500/10 text-rose-300 ring-rose-500/30',
+        dot: 'bg-rose-400',
+        card: 'border-rose-500/25',
+      },
+    };
+
+    // ---------- Mock data (shown immediately, before any backend event) ----------
+    function initialProjects() {
+      return [
+        {
+          id: 'e-ticaret-backend',
+          name: 'e-ticaret-backend',
+          state: 'running',
+          progress: 65,
+          content: {
+            running: {
+              task: 'AI, sepet.py dosyasında API güncellemeleri yapıyor...',
+              lastChange: { file: 'urunler.py', add: 24, del: 12 },
+              resume: [
+                'Sepetteki eski API uç noktaları kaldırıldı.',
+                'İndirim kodu kontrolü sepete eklendi.',
+                'Sırada stok güncelleme testleri var.',
+              ],
+            },
+            waiting: {
+              message: 'AI, sepet API güncellemelerini tamamladı ve sizin onayınızı bekliyor.',
+              summary: 'Sepet uç noktaları yeni yapıya taşındı, eski çağrılar kaldırıldı. 18 testin hepsi geçti.',
+              resume: ['Sepet API güncellemesi bitti, yalnızca onayın bekleniyor.'],
+            },
+            done: {
+              message: 'Sepet API güncellemesi tamamlandı. Değişiklikler kaydedildi ve tüm testler geçti.',
+              meta: '4 dosya değişti · 18 test geçti',
+              resume: ['Sıradaki iş: sipariş geçmişi sayfasının API’si.'],
+            },
+            error: {
+              error: { file: 'sepet.py', line: 112, message: 'Ürün fiyatı metin olarak geldi, sayıyla toplanamadı (TypeError).' },
+              resume: ['Hata öncesi: indirim kodu sepete uygulanıyordu.'],
+            },
+          },
+        },
+        {
+          id: 'odeme-servisi',
+          name: 'odeme-servisi',
+          state: 'waiting',
+          progress: 100,
+          content: {
+            running: {
+              task: 'AI, Stripe ödeme testlerini yazıyor...',
+              lastChange: { file: 'stripe_webhook.py', add: 41, del: 7 },
+              resume: ['Ödeme webhook’u yeniden yazılıyor.', 'Sırada iade senaryoları var.'],
+            },
+            waiting: {
+              message: 'AI, Stripe ödeme testlerini tamamladı ve sizin onayınızı bekliyor.',
+              summary: 'Kartla ödeme ve iade akışları için 12 yeni test yazıldı, hepsi başarıyla geçti. Canlıya almadan önce değişikliklere kısaca göz atmanız yeterli.',
+              resume: ['Ödeme webhook’u yeniden yazıldı; en son iade senaryosu üzerinde çalışıyordun.'],
+            },
+            done: {
+              message: 'Stripe entegrasyonu tamamlandı ve ana dala birleştirildi.',
+              meta: '6 dosya değişti · 12 test geçti',
+              resume: ['Sıradaki iş: fatura e-postalarının tasarımı.'],
+            },
+            error: {
+              error: { file: 'stripe_webhook.py', line: 57, message: 'Stripe imza anahtarı bulunamadı, istek doğrulanamadı.' },
+              resume: ['Hata öncesi: iade testleri çalıştırılıyordu.'],
+            },
+          },
+        },
+        {
+          id: 'frontend-web',
+          name: 'frontend-web',
+          state: 'error',
+          progress: 0,
+          content: {
+            running: {
+              task: 'AI, ödeme sayfasını yeni tasarıma geçiriyor...',
+              lastChange: { file: 'checkout.tsx', add: 63, del: 28 },
+              resume: ['Ödeme sayfasının yeni tasarımı uygulanıyor.', 'Sırada mobil görünüm düzenlemeleri var.'],
+            },
+            waiting: {
+              message: 'AI, ödeme sayfası tasarımını tamamladı ve sizin onayınızı bekliyor.',
+              summary: 'Ödeme sayfası yeni tasarıma geçirildi, mobilde de düzgün görünüyor. Ekran görüntüleri hazır.',
+              resume: ['Tasarım bitti, yalnızca onayın bekleniyor.'],
+            },
+            done: {
+              message: 'Ödeme sayfası yenilendi. Hata giderildi ve testler geçti.',
+              meta: '3 dosya değişti · 9 test geçti',
+              resume: ['Sıradaki iş: sipariş özeti bileşeni.'],
+            },
+            error: {
+              error: { file: 'checkout.tsx', line: 48, message: 'Tanımsız \'user\' verisi kullanıldı (null pointer error).' },
+              resume: [
+                'Giriş yapmamış kullanıcılar için ödeme akışı ekleniyordu.',
+                'Son kaydedilen değişiklik checkout.tsx dosyasındaydı.',
+              ],
+            },
+          },
+        },
+      ];
+    }
+
+    // ---------- App state ----------
+    let projects = initialProjects();
+    let focusedId = null;
+    let savedMinutes = 28;
+    let soundOn = true;
+
+    const $ = (sel) => document.querySelector(sel);
+    const grid = $('#grid');
+    const byId = (id) => projects.find((p) => p.id === id);
+
+    // ---------- Helpers ----------
+    function escapeHtml(text) {
+      return String(text)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+
+    // Escape, then render file names in JetBrains Mono (the only place mono is used).
+    const FILE_RE = /\b[\w-]+\.(?:py|tsx?|jsx?|json|ya?ml|md|css|html|go|rs|java|sql)\b/g;
+    function rich(text) {
+      return escapeHtml(text).replace(FILE_RE, (m) => `<span class="font-mono text-[0.92em] text-slate-100">${m}</span>`);
+    }
+
+    function contentFor(p, state) {
+      return p.content[state] || (p.content[state] = {});
+    }
+
+    function bullets(items) {
+      const list = Array.isArray(items) && items.length ? items : ['Henüz not yok.'];
+      return `<ul class="mt-2 space-y-1.5">${list
+        .map(
+          (item) => `<li class="flex gap-2 text-sm leading-relaxed text-slate-400">
+            <span class="mt-2 h-1 w-1 shrink-0 rounded-full bg-slate-600"></span><span>${rich(item)}</span></li>`
+        )
+        .join('')}</ul>`;
+    }
+
+    // ---------- Rendering ----------
+    function bodyHTML(p) {
+      const c = contentFor(p, p.state);
+
+      if (p.state === 'running') {
+        const task = (p.override && p.override.task) || c.task || 'AI çalışıyor...';
+        const lc = c.lastChange;
+        return `
+          <div class="rounded-xl border border-sky-500/15 bg-sky-500/[0.06] p-4">
+            <p class="text-sm leading-relaxed text-sky-100/90">${rich(task)}
+              <span class="font-semibold text-sky-300">(%<span data-pct>${Math.round(p.progress)}</span>)</span></p>
+            <div class="mt-3 h-1.5 overflow-hidden rounded-full bg-sky-950/70">
+              <div data-bar class="progress-bar h-full rounded-full bg-gradient-to-r from-sky-500 to-sky-300" style="width:${p.progress}%"></div>
+            </div>
+          </div>
+          ${
+            lc
+              ? `<p class="text-xs text-slate-500">Son değişiklik: ${rich(lc.file)}
+                  (<span class="text-emerald-400/90">+${lc.add}</span> / <span class="text-rose-400/90">-${lc.del}</span>)</p>`
+              : ''
+          }`;
+      }
+
+      if (p.state === 'waiting') {
+        return `
+          <div class="rounded-xl border border-amber-500/20 bg-amber-500/[0.07] p-4">
+            <p class="text-sm leading-relaxed text-amber-100/90">${rich(c.message || 'AI sizin onayınızı bekliyor.')}</p>
+          </div>
+          <div>
+            <h3 class="text-sm font-semibold text-slate-200">Ne Yapıldı?</h3>
+            <p class="mt-1.5 text-sm leading-relaxed text-slate-400">${rich(c.summary || '')}</p>
+          </div>
+          <div class="flex flex-col gap-2">
+            <button data-action="approve" type="button"
+              class="flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-500 px-4 py-2.5 text-sm font-semibold text-emerald-950 shadow-lg shadow-emerald-500/20 transition hover:bg-emerald-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300">
+              ✓ Onayla
+              <kbd class="rounded bg-emerald-950/15 px-1.5 text-[11px] font-semibold">Y</kbd>
+            </button>
+            <button data-action="reject" type="button"
+              class="w-full rounded-xl border border-line px-4 py-2.5 text-sm font-medium text-slate-300 transition hover:border-slate-600 hover:bg-white/[0.04] focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-500">
+              ✕ Reddet
+            </button>
+          </div>`;
+      }
+
+      if (p.state === 'error') {
+        const e = c.error || { file: '', line: '', message: 'Bilinmeyen hata.' };
+        const where = e.file ? `${rich(e.file)}${e.line ? ` (Satır ${escapeHtml(e.line)})` : ''} - ` : '';
+        return `
+          <div class="rounded-xl border border-rose-500/20 bg-rose-500/[0.07] p-4">
+            <p class="text-sm leading-relaxed text-rose-100/90"><span class="font-semibold text-rose-300">Hata:</span> ${where}${rich(e.message)}</p>
+          </div>
+          <button data-action="autofix" type="button"
+            class="w-full rounded-xl bg-[#F0645A] px-4 py-2.5 text-sm font-semibold text-white shadow-lg shadow-rose-500/20 transition hover:bg-[#F47A71] focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-300">
+            🔧 Hatayı Otomatik Düzelt (AI)
+          </button>`;
+      }
+
+      // done
+      return `
+        <div class="rounded-xl border border-emerald-500/20 bg-emerald-500/[0.07] p-4">
+          <p class="text-sm leading-relaxed text-emerald-100/90">${rich(c.message || 'Tüm işler tamamlandı.')}</p>
+        </div>
+        ${c.meta ? `<p class="text-xs text-slate-500">${rich(c.meta)}</p>` : ''}`;
+    }
+
+    function cardHTML(p, index) {
+      const meta = STATE_META[p.state];
+      const focused = p.id === focusedId;
+      const c = contentFor(p, p.state);
+      return `
+        <article data-id="${escapeHtml(p.id)}"
+          class="flex flex-col rounded-2xl border bg-card p-6 transition-shadow duration-200
+            ${meta.card || 'border-line'}
+            ${focused ? 'ring-2 ring-sky-400/70 ring-offset-2 ring-offset-base' : ''}">
+          <div class="flex items-center justify-between gap-3">
+            <span class="inline-flex items-center gap-2 rounded-full px-2.5 py-1 text-[11px] font-semibold tracking-wide ring-1 ring-inset ${meta.pill}">
+              <span class="h-1.5 w-1.5 rounded-full ${meta.dot}"></span>${meta.label}
+            </span>
+            <div class="flex items-center gap-2">
+              ${index < 9 ? `<kbd class="hidden rounded border border-line px-1.5 py-0.5 text-[11px] text-slate-500 sm:inline">${index + 1}</kbd>` : ''}
+              <button data-action="focus-editor" type="button"
+                class="rounded-lg border border-line px-2.5 py-1 text-xs font-medium text-slate-400 transition hover:border-slate-600 hover:text-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500/60">
+                Editörde Aç
+              </button>
+            </div>
+          </div>
+
+          <h2 class="mt-4 break-words text-xl font-bold tracking-tight text-slate-50">${escapeHtml(p.name)}</h2>
+
+          <div class="mt-5 flex flex-col gap-4">${bodyHTML(p)}</div>
+
+          <section class="mt-6 rounded-xl border border-line bg-white/[0.02] p-4">
+            <h3 class="text-xs font-semibold uppercase tracking-wider text-slate-500">Kaldığın Yer</h3>
+            ${bullets(c.resume)}
+          </section>
+        </article>`;
+    }
+
+    // A flex spacer pushes "Kaldığın Yer" to the bottom so equal-height cards line up.
+    function renderCard(p, { animate = false } = {}) {
+      const index = projects.indexOf(p);
+      const tpl = document.createElement('template');
+      tpl.innerHTML = cardHTML(p, index).trim();
+      const el = tpl.content.firstElementChild;
+      const resume = el.querySelector('section');
+      const spacer = document.createElement('div');
+      spacer.className = 'flex-1';
+      el.insertBefore(spacer, resume);
+      if (animate) el.classList.add('card-enter');
+
+      const existing = grid.querySelector(`article[data-id="${CSS.escape(p.id)}"]`);
+      if (existing) existing.replaceWith(el);
+      else grid.appendChild(el);
+    }
+
+    function renderAll() {
+      grid.innerHTML = '';
+      projects.forEach((p) => renderCard(p));
+      renderHeader();
+      renderDemoPanel();
+    }
+
+    function renderHeader() {
+      $('#stat-active').textContent = projects.filter((p) => p.state !== 'done').length;
+      $('#stat-waiting').textContent = projects.filter((p) => p.state === 'waiting').length;
+      $('#stat-errors').textContent = projects.filter((p) => p.state === 'error').length;
+      $('#stat-saved').textContent = `+${savedMinutes} dk`;
+    }
+
+    // Progress ticks update the bar in place so the CSS transition stays smooth.
+    function updateProgress(p) {
+      const el = grid.querySelector(`article[data-id="${CSS.escape(p.id)}"]`);
+      if (!el) return;
+      const bar = el.querySelector('[data-bar]');
+      const pct = el.querySelector('[data-pct]');
+      if (bar) bar.style.width = `${p.progress}%`;
+      if (pct) pct.textContent = Math.round(p.progress);
+    }
+
+    // ---------- State transitions ----------
+    function setState(p, state, opts = {}) {
+      if (!STATES.includes(state)) return;
+      const changed = p.state !== state;
+      p.state = state;
+      p.override = opts.override || null;
+      p.autoTarget = opts.autoTarget || null;
+      p.completing = false;
+      if (typeof opts.progress === 'number') p.progress = opts.progress;
+      else if (state === 'running' && changed) p.progress = 8;
+      else if (state === 'waiting' || state === 'done') p.progress = 100;
+
+      renderCard(p, { animate: changed });
+      renderHeader();
+      renderDemoPanel();
+      if (changed && (state === 'waiting' || state === 'done')) chime(state);
+    }
+
+    function runAction(p, command) {
+      const sent = send({ type: 'action', projectId: p.id, command });
+
+      if (command === 'approve') {
+        setState(p, 'running', {
+          progress: 5,
+          autoTarget: 'done',
+          override: { task: 'AI, onayladığınız değişiklikleri uyguluyor ve son testleri çalıştırıyor...' },
+        });
+        toast(`${p.name}: onaylandı`);
+      } else if (command === 'reject') {
+        setState(p, 'running', {
+          progress: 5,
+          autoTarget: 'waiting',
+          override: { task: 'AI, reddettiğiniz değişiklikleri geri alıyor ve farklı bir çözüm deniyor...' },
+        });
+        toast(`${p.name}: reddedildi, AI yeni bir çözüm hazırlıyor`);
+      } else if (command === 'autofix') {
+        const e = contentFor(p, 'error').error || {};
+        setState(p, 'running', {
+          progress: 5,
+          autoTarget: 'done',
+          override: {
+            task: e.file
+              ? `AI, ${e.file} dosyasındaki hatayı düzeltiyor ve testleri yeniden çalıştırıyor...`
+              : 'AI, hatayı düzeltiyor ve testleri yeniden çalıştırıyor...',
+          },
+        });
+        toast(`${p.name}: otomatik düzeltme başladı`);
+      }
+      if (!sent) console.info('[kule] WebSocket offline; action applied locally only:', command, p.id);
+    }
+
+    // ---------- Progress simulation (only for projects the server is not driving) ----------
+    setInterval(() => {
+      projects.forEach((p) => {
+        if (p.state !== 'running' || p.serverProgress) return;
+        if (p.autoTarget) {
+          p.progress = Math.min(100, p.progress + 2 + Math.random() * 4);
+          updateProgress(p);
+          if (p.progress >= 100 && !p.completing) {
+            p.completing = true;
+            const target = p.autoTarget;
+            setTimeout(() => p.completing && setState(p, target), 500);
+          }
+        } else if (p.progress < 94 && Math.random() < 0.35) {
+          p.progress += 1;
+          updateProgress(p);
+        }
+      });
+    }, TICK_MS);
+
+    // Saved time grows while at least one agent is working for you.
+    setInterval(() => {
+      if (!projects.some((p) => p.state === 'running')) return;
+      savedMinutes += 1;
+      const el = $('#stat-saved');
+      el.textContent = `+${savedMinutes} dk`;
+      el.classList.remove('bump');
+      void el.offsetWidth; // restart animation
+      el.classList.add('bump');
+    }, SAVED_TIME_STEP_MS);
+
+    // ---------- Sound (Web Audio API, no files) ----------
+    let audioCtx = null;
+    function ensureAudio() {
+      const Ctx = window.AudioContext || window.webkitAudioContext;
+      if (!Ctx) return null;
+      if (!audioCtx) audioCtx = new Ctx();
+      if (audioCtx.state === 'suspended') audioCtx.resume();
+      return audioCtx;
+    }
+
+    // Soft two-note bell: a sine with a quiet octave overtone and a long decay.
+    function chime(kind) {
+      if (!soundOn) return;
+      const ctx = ensureAudio();
+      if (!ctx) return;
+      const notes = kind === 'done' ? [659.25, 987.77] : [783.99, 1046.5]; // E5→B5 / G5→C6
+      const master = ctx.createGain();
+      master.gain.value = 0.16;
+      master.connect(ctx.destination);
+      const t0 = ctx.currentTime + 0.02;
+
+      notes.forEach((freq, i) => {
+        const start = t0 + i * 0.15;
+        [[freq, 1, 'sine'], [freq * 2, 0.18, 'triangle']].forEach(([f, level, type]) => {
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.type = type;
+          osc.frequency.value = f;
+          gain.gain.setValueAtTime(0.0001, start);
+          gain.gain.exponentialRampToValueAtTime(level, start + 0.015);
+          gain.gain.exponentialRampToValueAtTime(0.0001, start + 1.2);
+          osc.connect(gain).connect(master);
+          osc.start(start);
+          osc.stop(start + 1.25);
+        });
+      });
+    }
+
+    // Browsers only allow audio after a user gesture; unlock on the first one.
+    const unlockAudio = () => { if (soundOn) ensureAudio(); };
+    window.addEventListener('pointerdown', unlockAudio, { once: true });
+    window.addEventListener('keydown', unlockAudio, { once: true });
+
+    $('#sound-toggle').addEventListener('click', (ev) => {
+      soundOn = !soundOn;
+      ev.currentTarget.textContent = soundOn ? 'Ses: Açık 🔊' : 'Ses: Kapalı 🔇';
+      ev.currentTarget.setAttribute('aria-pressed', String(soundOn));
+      if (soundOn) chime('waiting'); // short preview so the user hears it works
+    });
+
+    // ---------- Toast ----------
+    let toastTimer = null;
+    function toast(message) {
+      const el = $('#toast');
+      el.textContent = message;
+      el.classList.remove('opacity-0', '-translate-y-2');
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => el.classList.add('opacity-0', '-translate-y-2'), 2400);
+    }
+
+    // ---------- Card interactions ----------
+    grid.addEventListener('click', (ev) => {
+      const card = ev.target.closest('article[data-id]');
+      if (!card) return;
+      const p = byId(card.dataset.id);
+      if (!p) return;
+      const btn = ev.target.closest('[data-action]');
+
+      if (!btn) {
+        focusCard(p.id, { scroll: false });
+        return;
+      }
+      const action = btn.dataset.action;
+      if (action === 'focus-editor') openInEditor(p);
+      else runAction(p, action);
+    });
+
+    async function openInEditor(project) {
+      try {
+        const res = await fetch('/focus/' + project.id);
+        toast(res.ok ? `${project.name} editörde açılıyor…` : 'Editör açılamadı: sunucu isteği kabul etmedi.');
+      } catch {
+        toast('Editör açılamadı: sunucuya ulaşılamıyor.');
+      }
+    }
+
+    function focusCard(id, { scroll = true } = {}) {
+      const prev = focusedId;
+      focusedId = id;
+      [prev, id].forEach((pid) => {
+        const p = pid && byId(pid);
+        if (p) renderCard(p);
+      });
+      if (scroll && id) {
+        const el = grid.querySelector(`article[data-id="${CSS.escape(id)}"]`);
+        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }
+    }
+
+    // ---------- Keyboard shortcuts ----------
+    document.addEventListener('keydown', (ev) => {
+      if (ev.metaKey || ev.ctrlKey || ev.altKey) return;
+      const t = ev.target;
+      if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
+
+      if (/^[1-9]$/.test(ev.key)) {
+        const p = projects[Number(ev.key) - 1];
+        if (p) focusCard(p.id);
+      } else if (ev.key === 'y' || ev.key === 'Y') {
+        const focused = byId(focusedId);
+        const target = focused && focused.state === 'waiting' ? focused : projects.find((p) => p.state === 'waiting');
+        if (target) runAction(target, 'approve');
+        else toast('Onay bekleyen proje yok.');
+      } else if (ev.key === 'Escape' && focusedId) {
+        focusCard(null);
+      }
+    });
+
+    // ---------- Demo control panel ----------
+    const demoBody = $('#demo-body');
+
+    function renderDemoPanel() {
+      demoBody.innerHTML =
+        projects
+          .map(
+            (p) => `
+          <div data-demo-id="${escapeHtml(p.id)}">
+            <p class="mb-1.5 truncate text-sm font-semibold text-slate-200">${escapeHtml(p.name)}</p>
+            <div class="grid grid-cols-2 gap-1.5 sm:grid-cols-4">
+              ${STATES.map((s) => {
+                const active = p.state === s;
+                return `<button type="button" data-demo-state="${s}"
+                  class="whitespace-nowrap rounded-lg border px-1 py-1.5 text-[11px] font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500/60
+                  ${active ? 'border-slate-500 bg-white/[0.08] text-slate-50' : 'border-line text-slate-400 hover:border-slate-600 hover:text-slate-200'}">
+                  <span class="mr-1 inline-block h-1.5 w-1.5 rounded-full ${STATE_META[s].dot.replace(' animate-pulse', '')}"></span>${STATE_META[s].demoLabel}
+                </button>`;
+              }).join('')}
+            </div>
+          </div>`
+          )
+          .join('') +
+        `<button type="button" data-demo-reset
+          class="w-full rounded-lg border border-dashed border-line px-3 py-2 text-xs font-medium text-slate-500 transition hover:border-slate-600 hover:text-slate-300">
+          Başlangıç durumuna dön
+        </button>`;
+    }
+
+    demoBody.addEventListener('click', (ev) => {
+      if (ev.target.closest('[data-demo-reset]')) {
+        projects = initialProjects();
+        savedMinutes = 28;
+        focusedId = null;
+        renderAll();
+        toast('Demo sıfırlandı');
+        return;
+      }
+      const btn = ev.target.closest('[data-demo-state]');
+      if (!btn) return;
+      const p = byId(btn.closest('[data-demo-id]').dataset.demoId);
+      if (!p) return;
+      const state = btn.dataset.demoState;
+      setState(p, state, state === 'running' ? { progress: 35 } : {});
+    });
+
+    function setDemoOpen(open) {
+      $('#demo-body').classList.toggle('hidden', !open);
+      $('#demo-toggle').setAttribute('aria-expanded', String(open));
+      $('#demo-chevron').style.transform = open ? 'rotate(180deg)' : '';
+    }
+    $('#demo-toggle').addEventListener('click', () => {
+      setDemoOpen($('#demo-toggle').getAttribute('aria-expanded') !== 'true');
+    });
+
+    // ---------- WebSocket client ----------
+    const WS_URL = location.host ? `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws` : null;
+    let ws = null;
+    let retryDelay = 1000;
+
+    function setConnection(online) {
+      $('#conn-dot').className = `h-1.5 w-1.5 rounded-full ${online ? 'bg-emerald-400' : 'bg-slate-600'}`;
+      $('#conn-label').textContent = online ? 'Sunucuya bağlı · canlı veri' : 'Sunucu bağlı değil · demo verisi gösteriliyor';
+    }
+
+    function connect() {
+      if (!WS_URL) return setConnection(false);
+      try {
+        ws = new WebSocket(WS_URL);
+      } catch {
+        setConnection(false);
+        return scheduleReconnect();
+      }
+      ws.addEventListener('open', () => {
+        retryDelay = 1000;
+        setConnection(true);
+      });
+      ws.addEventListener('message', (ev) => {
+        let msg;
+        try { msg = JSON.parse(ev.data); } catch { return; }
+        handleMessage(msg);
+      });
+      ws.addEventListener('close', () => {
+        setConnection(false);
+        scheduleReconnect();
+      });
+    }
+
+    function scheduleReconnect() {
+      setTimeout(connect, retryDelay);
+      retryDelay = Math.min(retryDelay * 2, 15000);
+    }
+
+    function send(payload) {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify(payload));
+        return true;
+      }
+      return false;
+    }
+
+    function handleMessage(msg) {
+      if (!msg || typeof msg !== 'object') return;
+      if (msg.type === 'snapshot' && Array.isArray(msg.projects)) msg.projects.forEach(applyPatch);
+      else if (msg.type === 'update' && msg.project) applyPatch(msg.project);
+      else if (msg.type === 'stats' && typeof msg.savedMinutes === 'number') {
+        savedMinutes = msg.savedMinutes;
+        renderHeader();
+      }
+    }
+
+    function applyPatch(patch) {
+      if (!patch || !patch.id) return;
+      let p = byId(patch.id);
+      if (!p) {
+        p = { id: String(patch.id), name: String(patch.name || patch.id), state: 'running', progress: 0, content: {} };
+        projects.push(p);
+        renderCard(p, { animate: true });
+      }
+      if (patch.name) p.name = String(patch.name);
+
+      const target = STATES.includes(patch.state) ? patch.state : p.state;
+      const c = contentFor(p, target);
+      ['task', 'lastChange', 'message', 'summary', 'error', 'resume', 'meta'].forEach((k) => {
+        if (k in patch) c[k] = patch[k];
+      });
+      if ('task' in patch) p.override = null;
+      if (typeof patch.progress === 'number') {
+        p.serverProgress = true;
+        p.progress = Math.max(0, Math.min(100, patch.progress));
+      }
+
+      if (target !== p.state) {
+        setState(p, target, { progress: p.progress });
+      } else {
+        renderCard(p);
+        renderHeader();
+        renderDemoPanel();
+      }
+    }
+
+    // ---------- Boot ----------
+    renderAll();
+    setDemoOpen(window.matchMedia('(min-width: 768px)').matches);
+    connect();
+  </script>
+</body>
+</html>
