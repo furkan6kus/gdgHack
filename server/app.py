@@ -30,6 +30,7 @@ from server.schemas import (
     BrowseResponse,
     ErrorPayload,
     HealthResponse,
+    Place,
 )
 
 log = logging.getLogger(__name__)
@@ -112,7 +113,7 @@ def _install_routes(app: FastAPI, store: JobStore) -> None:
 
     @app.post("/api/analyze")
     async def analyze(body: AnalyzeRequest) -> AnalyzeStarted:
-        root = browse.resolve_dir(body.path)
+        root = browse.resolve_target(body.path)  # a folder or a single file
         job = store.start(root, verify=body.verify)
         return AnalyzeStarted(job_id=job.id)
 
@@ -129,6 +130,10 @@ def _install_routes(app: FastAPI, store: JobStore) -> None:
     @app.get("/api/browse")
     async def browse_dir(path: str | None = None, show_hidden: bool = False) -> BrowseResponse:
         return browse.list_dir(browse.resolve_dir(path), show_hidden=show_hidden)
+
+    @app.get("/api/places")
+    async def places() -> list[Place]:
+        return browse.places()
 
     @app.post("/api/apply")
     async def apply(body: ApplyRequest) -> ApplyResponse:

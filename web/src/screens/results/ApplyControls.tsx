@@ -19,20 +19,27 @@ export function ApplyBar({
 }: ApplyBarProps) {
   return (
     <footer className="flex h-14 shrink-0 items-center gap-3 border-t border-border bg-panel px-4">
-      <span className="text-sm">
-        <span className="font-mono font-semibold">{checkedCount}</span>
-        <span className="text-muted"> / {applicableCount} uygulanabilir öneri seçildi</span>
+      <span className="text-sm text-muted">
+        {checkedCount > 0 ? (
+          <>
+            <span className="font-semibold text-text">{checkedCount}</span> öneri seçili
+          </>
+        ) : (
+          'Uygulamak istediğiniz önerileri işaretleyin'
+        )}
       </span>
-      <span className="hidden items-center gap-1.5 text-[11px] text-muted lg:flex">
-        <Kbd>j</Kbd>
-        <Kbd>k</Kbd> gezin <Kbd>space</Kbd> seç
-      </span>
-      <div className="ml-auto flex gap-2">
-        <Button variant="ghost" onClick={onSelectNone} disabled={checkedCount === 0}>
+      {checkedCount > 0 && (
+        <Button size="sm" variant="ghost" onClick={onSelectNone}>
           Hiçbiri
         </Button>
+      )}
+      <span className="hidden items-center gap-1.5 text-[11px] text-muted/70 xl:flex">
+        <Kbd>j</Kbd>
+        <Kbd>k</Kbd> gezin · <Kbd>space</Kbd> seç
+      </span>
+      <div className="ml-auto flex gap-2">
         <Button onClick={onApplyAll} disabled={applicableCount === 0}>
-          Tümünü uygula
+          Tümünü uygula ({applicableCount})
         </Button>
         <Button variant="primary" onClick={onApplySelected} disabled={checkedCount === 0}>
           Seçilileri uygula

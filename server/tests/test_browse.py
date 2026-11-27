@@ -62,3 +62,18 @@ def test_is_denied_case_insensitive(name: str) -> None:
 @pytest.mark.parametrize("name", ["main.py", "src", "environment.py", "keyboard.txt"])
 def test_is_denied_allows_normal_names(name: str) -> None:
     assert not browse.is_denied(name)
+
+
+def test_browse_file_lists_its_folder(client: TestClient, tmp_path: Path) -> None:
+    (tmp_path / "main.py").write_text("x = 1\n")
+    response = client.get("/api/browse", params={"path": str(tmp_path / "main.py")})
+    assert response.status_code == 200
+    assert response.json()["path"] == str(tmp_path.resolve())
+
+
+def test_places_include_home(client: TestClient) -> None:
+    response = client.get("/api/places")
+    assert response.status_code == 200
+    places = response.json()
+    assert places[0] == {"name": "Ev", "path": str(Path.home()), "kind": "home"}
+    assert all(p["kind"] in {"home", "folder", "drive"} for p in places)

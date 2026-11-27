@@ -68,6 +68,9 @@ class Suggestion(BaseModel):
     finding_ids: list[str]
     category: Category
     explanation: str
+    # UI addition (not in the spec yet, see docs/ui-core-requests.md §10): a short
+    # human-readable title for list rows. The UI falls back to the finding message.
+    title: str | None = None
     patch: Patch
     verification: VerificationResult
 

@@ -1,17 +1,16 @@
-import type { AnalyzeResult, Category, Finding, Severity, Suggestion } from '../../api/types';
+import type { AnalyzeResult, Category, Finding, Suggestion } from '../../api/types';
 
 export interface FindingRow {
   finding: Finding;
   suggestion: Suggestion | null;
 }
 
-export interface Filters {
-  categories: ReadonlySet<Category>;
-  severities: ReadonlySet<Severity>;
-  file: string | null;
+export interface FileGroup {
+  file: string;
+  rows: FindingRow[];
 }
 
-export const EMPTY_FILTERS: Filters = { categories: new Set(), severities: new Set(), file: null };
+export type CategoryFilter = Category | 'all';
 
 /** Join findings with their (non-failed) suggestion, sorted by file and line. */
 export function buildRows(result: AnalyzeResult): FindingRow[] {
@@ -25,19 +24,48 @@ export function buildRows(result: AnalyzeResult): FindingRow[] {
     .map((finding) => ({ finding, suggestion: byFinding.get(finding.id) ?? null }));
 }
 
-export function applyFilters(rows: FindingRow[], filters: Filters): FindingRow[] {
-  return rows.filter(({ finding, suggestion }) => {
-    if (filters.file !== null && finding.file !== filters.file) return false;
-    if (filters.severities.size > 0 && !filters.severities.has(finding.severity)) return false;
-    if (filters.categories.size > 0) {
-      return suggestion !== null && filters.categories.has(suggestion.category);
-    }
-    return true;
-  });
+/** Rows that carry a suggestion and match the category filter. */
+export function suggestionRows(rows: FindingRow[], category: CategoryFilter): FindingRow[] {
+  return rows.filter(
+    (r) => r.suggestion !== null && (category === 'all' || r.suggestion.category === category),
+  );
 }
 
-export function isFiltered(filters: Filters): boolean {
-  return filters.file !== null || filters.categories.size > 0 || filters.severities.size > 0;
+export function orphanRows(rows: FindingRow[]): FindingRow[] {
+  return rows.filter((r) => r.suggestion === null);
+}
+
+/** Group consecutive rows by file; rows are already sorted by file. */
+export function groupByFile(rows: FindingRow[]): FileGroup[] {
+  const groups: FileGroup[] = [];
+  for (const row of rows) {
+    const last = groups.at(-1);
+    if (last?.file === row.finding.file) last.rows.push(row);
+    else groups.push({ file: row.finding.file, rows: [row] });
+  }
+  return groups;
+}
+
+export function countByCategory(rows: FindingRow[]): Record<CategoryFilter, number> {
+  const counts: Record<CategoryFilter, number> = {
+    all: 0,
+    bug: 0,
+    perf: 0,
+    style: 0,
+    shrink: 0,
+    translate: 0,
+  };
+  for (const { suggestion } of rows) {
+    if (!suggestion) continue;
+    counts.all += 1;
+    counts[suggestion.category] += 1;
+  }
+  return counts;
+}
+
+/** Short, human title for a row: the LLM title when present, else the analyzer message. */
+export function rowTitle(row: FindingRow): string {
+  return row.suggestion?.title || row.finding.message;
 }
 
 export function isApplicable(suggestion: Suggestion | null, applied: ReadonlySet<string>): boolean {
@@ -59,12 +87,7 @@ export function languageFor(file: string): string {
     tsx: 'typescript',
     js: 'javascript',
     jsx: 'javascript',
-    json: 'json',
     md: 'markdown',
   };
   return map[ext] ?? 'plaintext';
-}
-
-export function basename(path: string): string {
-  return path.split('/').pop() ?? path;
 }

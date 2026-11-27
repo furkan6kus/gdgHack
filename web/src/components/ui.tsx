@@ -1,7 +1,5 @@
 // Small presentational primitives shared across screens.
 import type { ButtonHTMLAttributes, ReactNode } from 'react';
-import type { Severity, VerificationStatus } from '../api/types';
-import { SEVERITY_BG, SEVERITY_LABELS } from '../lib/labels';
 
 type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'danger';
 
@@ -28,7 +26,7 @@ export function Button({
   return (
     <button
       type={type}
-      className={`inline-flex items-center justify-center gap-2 rounded-md font-medium transition-[background,border,filter,color] duration-150 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:pointer-events-none disabled:opacity-40 ${sizing} ${VARIANT_CLASSES[variant]} ${className}`}
+      className={`inline-flex shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-md font-medium transition-[background,border,filter,color] duration-150 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:pointer-events-none disabled:opacity-40 ${sizing} ${VARIANT_CLASSES[variant]} ${className}`}
       {...rest}
     />
   );
@@ -39,47 +37,6 @@ export function Kbd({ children }: { children: ReactNode }) {
     <kbd className="rounded border border-border bg-panel-2 px-1.5 py-px font-mono text-[10px] text-muted">
       {children}
     </kbd>
-  );
-}
-
-export function SeverityDot({ severity }: { severity: Severity }) {
-  return (
-    <span
-      title={SEVERITY_LABELS[severity]}
-      className={`inline-block size-2 shrink-0 rounded-full ${SEVERITY_BG[severity]}`}
-    />
-  );
-}
-
-const BADGE: Record<Exclude<VerificationStatus, 'failed'>, { icon: string; label: string; cls: string }> =
-  {
-    passed: { icon: '✓', label: 'Doğrulandı', cls: 'bg-ok/12 text-ok border-ok/25' },
-    skipped: { icon: '⚠', label: 'Doğrulanamadı', cls: 'bg-warn/12 text-warn border-warn/25' },
-  };
-
-export function VerificationBadge({
-  status,
-  compact = false,
-}: {
-  status: VerificationStatus | null;
-  compact?: boolean;
-}) {
-  if (status === null || status === 'failed') {
-    return (
-      <span className="rounded border border-border px-1.5 py-px text-[10px] text-muted">
-        öneri yok
-      </span>
-    );
-  }
-  const badge = BADGE[status];
-  return (
-    <span
-      title={badge.label}
-      className={`inline-flex items-center gap-1 rounded border px-1.5 py-px text-[11px] font-medium ${badge.cls}`}
-    >
-      <span aria-hidden>{badge.icon}</span>
-      {!compact && badge.label}
-    </span>
   );
 }
 

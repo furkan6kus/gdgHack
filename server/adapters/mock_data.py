@@ -136,6 +136,7 @@ def _s(
     sid: str,
     finding_ids: list[str],
     category: str,
+    title: str,
     explanation: str,
     file: str,
     original: str,
@@ -149,6 +150,7 @@ def _s(
             "id": sid,
             "finding_ids": finding_ids,
             "category": category,
+            "title": title,
             "explanation": explanation,
             "patch": Patch(file=file, original_text=original, new_text=new),
             "verification": VerificationResult.model_validate(
@@ -163,6 +165,7 @@ SUGGESTIONS: list[Suggestion] = [
         "S1",
         ["F1"],
         "bug",
+        "Değiştirilebilir varsayılan argüman faturalar arasında sızıyor",
         "`lines=[]` varsayılan değeri fonksiyon tanımlandığında bir kez oluşturulur ve "
         "tüm çağrılar arasında paylaşılır. İkinci faturada önceki faturanın kalemleri de "
         "görünür. Varsayılanı `None` yapıp fonksiyon içinde yeni liste oluşturmak bu "
@@ -191,6 +194,7 @@ SUGGESTIONS: list[Suggestion] = [
         "S2",
         ["F2"],
         "style",
+        "None karşılaştırması `is None` ile yapılmalı",
         "`== None` karşılaştırması `__eq__` metodunu çağırır ve özel sınıflarda yanlış "
         "sonuç verebilir. Kimlik karşılaştırması (`is None`) hem doğru hem de "
         "Python'da önerilen yazımdır.",
@@ -205,6 +209,7 @@ SUGGESTIONS: list[Suggestion] = [
         "S3",
         ["F3"],
         "bug",
+        "Çıplak `except` tüm hataları sessizce yutuyor",
         "Çıplak `except:` `KeyboardInterrupt` ve `SystemExit` dahil her şeyi yakalar; "
         "sunucu kapatılamaz hale gelebilir ve gerçek hatalar sessizce yutulur. Yalnızca "
         "beklenen istisnayı yakalayıp günlüğe yazmak daha güvenli.",
@@ -226,6 +231,7 @@ SUGGESTIONS: list[Suggestion] = [
         "S4",
         ["F4"],
         "bug",
+        "İstisna zinciri kayboluyor: `from err` eksik",
         "`except` içinde yeni bir istisna fırlatılırken `from err` kullanılmazsa asıl "
         "neden traceback'te 'During handling...' olarak karışık görünür. `from err` "
         "zinciri açıkça kurar ve hata ayıklamayı kolaylaştırır.",
@@ -246,6 +252,7 @@ SUGGESTIONS: list[Suggestion] = [
         "S5",
         ["F5"],
         "perf",
+        "Döngü yerine liste kavrayışı kullan",
         "Döngü içinde `append` her adımda metot araması yapar. Liste kavrayışı aynı işi "
         "tek ifadede ve belirgin şekilde daha hızlı yapar.",
         "src/utils/cache.py",
@@ -265,6 +272,7 @@ SUGGESTIONS: list[Suggestion] = [
         "S6",
         ["F6"],
         "perf",
+        "`try` bloğunu döngünün dışına al",
         "`try` bloğunu döngünün dışına almak istisna kurulum maliyetini azaltır.",
         "src/utils/cache.py",
         "    for key in keys:\n"
@@ -285,6 +293,7 @@ SUGGESTIONS: list[Suggestion] = [
         "S7",
         ["F7"],
         "style",
+        "if/else bloğu yerine koşullu ifade",
         "Dört satırlık `if`/`else` bloğu tek bir koşullu ifadeyle aynı anlamı daha "
         "okunur şekilde ifade eder.",
         "src/utils/text.py",
@@ -298,6 +307,7 @@ SUGGESTIONS: list[Suggestion] = [
         "S8",
         ["F8"],
         "bug",
+        "Hesaplanan KDV oranı kullanılmıyor",
         "`rate` hesaplanıyor ama hiç kullanılmıyor; aşağıdaki satır sabit `0.18` "
         "değerini kullanıyor. Büyük ihtimalle amaçlanan, hesaplanan oranın "
         "kullanılmasıydı. Bu bir mantık hatasıdır, yalnızca stil sorunu değil.",
@@ -316,6 +326,7 @@ SUGGESTIONS: list[Suggestion] = [
         "S9",
         ["F10"],
         "style",
+        "Gereksiz üreteç yerine küme kavrayışı",
         "`set(...)` içine verilen üreteç ifadesi yerine doğrudan küme kavrayışı "
         "kullanmak daha kısa ve biraz daha hızlıdır.",
         "src/api/handlers.py",
@@ -329,6 +340,7 @@ SUGGESTIONS: list[Suggestion] = [
         "S10",
         ["F11"],
         "style",
+        "Kullanılmayan içe aktarma",
         "`ROUND_UP` içe aktarılmış ama testlerde kullanılmıyor. Kullanılmayan içe "
         "aktarmalar okuyucuyu yanıltır ve lint gürültüsü yaratır.",
         "tests/test_invoice.py",

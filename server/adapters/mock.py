@@ -78,7 +78,7 @@ class MockAdapter:
         return ApplyOutcome(
             applied_ids=[s.id for s in suggestions],
             changed_files=sorted({s.patch.file for s in suggestions}),
-            backup_path=str(root / ".mytool" / "backup" / stamp),
+            backup_path=str(_project_dir(root) / ".mytool" / "backup" / stamp),
         )
 
 
@@ -140,3 +140,8 @@ def _mark_unverified(suggestions: list[Suggestion]) -> list[Suggestion]:
 
 def _token_usage(n_suggestions: int) -> TokenUsage:
     return TokenUsage(input_tokens=1840 * n_suggestions, output_tokens=410 * n_suggestions)
+
+
+def _project_dir(root: Path) -> Path:
+    """Backups live next to the project; a single analyzed file uses its folder."""
+    return root if root.is_dir() else root.parent

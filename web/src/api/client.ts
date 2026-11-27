@@ -8,6 +8,7 @@ import {
   type BrowseResponse,
   type ErrorPayload,
   type HealthResponse,
+  type Place,
   type ProgressEvent,
 } from './types';
 
@@ -91,6 +92,8 @@ export const api = {
     const query = params.toString();
     return request<BrowseResponse>(`/api/browse${query ? `?${query}` : ''}`);
   },
+
+  places: () => request<Place[]>('/api/places'),
 
   apply: (jobId: string, suggestionIds: string[]) =>
     postJson<ApplyResponse>('/api/apply', { job_id: jobId, suggestion_ids: suggestionIds }),

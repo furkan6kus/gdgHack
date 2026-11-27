@@ -34,6 +34,8 @@ export interface Suggestion {
   finding_ids: string[];
   category: Category;
   explanation: string;
+  /** UI addition (see docs/ui-core-requests.md §10); may be absent from the core. */
+  title?: string | null;
   patch: Patch;
   verification: VerificationResult;
 }
@@ -97,6 +99,12 @@ export interface BrowseResponse {
   path: string;
   parent: string | null;
   entries: BrowseEntry[];
+}
+
+export interface Place {
+  name: string;
+  path: string;
+  kind: 'home' | 'folder' | 'drive';
 }
 
 export interface HealthResponse {

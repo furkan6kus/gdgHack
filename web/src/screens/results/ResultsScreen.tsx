@@ -8,16 +8,16 @@ import { Button } from '../../components/ui';
 import { useHotkeys } from '../../hooks/useHotkeys';
 import { formatNumber } from '../../lib/labels';
 import { ApplyBar, ConfirmApplyModal } from './ApplyControls';
-import { FileList } from './FileList';
 import { FindingDetail } from './FindingDetail';
 import { FindingList } from './FindingList';
 import {
-  EMPTY_FILTERS,
-  applyFilters,
   buildRows,
+  countByCategory,
   isApplicable,
+  orphanRows,
+  suggestionRows,
   toggleIn,
-  type Filters,
+  type CategoryFilter,
 } from './model';
 
 interface ResultsScreenProps {
@@ -28,8 +28,11 @@ interface ResultsScreenProps {
 
 export function ResultsScreen({ jobId, result, onNewAnalysis }: ResultsScreenProps) {
   const allRows = useMemo(() => buildRows(result), [result]);
-  const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
-  const [selectedId, setSelectedId] = useState<string | null>(allRows[0]?.finding.id ?? null);
+  const [category, setCategory] = useState<CategoryFilter>('all');
+  const [showOrphans, setShowOrphans] = useState(false);
+  const [selectedId, setSelectedId] = useState<string | null>(
+    () => suggestionRows(allRows, 'all')[0]?.finding.id ?? null,
+  );
   const [checked, setChecked] = useState<Set<string>>(new Set());
   const [applied, setApplied] = useState<Set<string>>(new Set());
   const [pending, setPending] = useState<Suggestion[]>([]);
@@ -37,8 +40,15 @@ export function ResultsScreen({ jobId, result, onNewAnalysis }: ResultsScreenPro
   const [applyError, setApplyError] = useState<ErrorPayload | null>(null);
   const [lastApply, setLastApply] = useState<ApplyResponse | null>(null);
 
-  const rows = useMemo(() => applyFilters(allRows, filters), [allRows, filters]);
-  const selectedRow = rows.find((r) => r.finding.id === selectedId) ?? null;
+  const rows = useMemo(() => suggestionRows(allRows, category), [allRows, category]);
+  const orphans = useMemo(() => orphanRows(allRows), [allRows]);
+  const counts = useMemo(() => countByCategory(allRows), [allRows]);
+  // Navigation order matches what is visible: suggestion rows, then expanded orphans.
+  const visible = useMemo(
+    () => (showOrphans && category === 'all' ? [...rows, ...orphans] : rows),
+    [rows, orphans, showOrphans, category],
+  );
+  const selectedRow = visible.find((r) => r.finding.id === selectedId) ?? null;
   const applicable = useMemo(
     () => result.suggestions.filter((s) => isApplicable(s, applied)),
     [result.suggestions, applied],
@@ -49,10 +59,16 @@ export function ResultsScreen({ jobId, result, onNewAnalysis }: ResultsScreenPro
   };
 
   const move = (delta: number) => {
-    if (rows.length === 0) return;
-    const index = rows.findIndex((r) => r.finding.id === selectedId);
-    const next = Math.min(rows.length - 1, Math.max(0, index + delta));
-    setSelectedId(rows[index === -1 ? 0 : next].finding.id);
+    if (visible.length === 0) return;
+    const index = visible.findIndex((r) => r.finding.id === selectedId);
+    const next = Math.min(visible.length - 1, Math.max(0, index + delta));
+    setSelectedId(visible[index === -1 ? 0 : next].finding.id);
+  };
+
+  const changeCategory = (next: CategoryFilter) => {
+    setCategory(next);
+    const first = suggestionRows(allRows, next)[0];
+    if (first) setSelectedId(first.finding.id);
   };
 
   useHotkeys(
@@ -103,22 +119,18 @@ export function ResultsScreen({ jobId, result, onNewAnalysis }: ResultsScreenPro
         </div>
       ) : (
         <>
-          <div className="grid min-h-0 flex-1 grid-cols-[220px_minmax(340px,1fr)_minmax(420px,1.25fr)] divide-x divide-border">
-            <FileList
-              files={result.files}
-              selected={filters.file}
-              onSelect={(file) => setFilters((f) => ({ ...f, file }))}
-            />
+          <div className="grid min-h-0 flex-1 grid-cols-[minmax(340px,2fr)_3fr] grid-rows-[minmax(0,1fr)] divide-x divide-border">
             <FindingList
               rows={rows}
-              totalCount={allRows.length}
-              filters={filters}
+              orphans={orphans}
+              showOrphans={showOrphans}
+              onToggleOrphans={() => setShowOrphans((v) => !v)}
+              category={category}
+              counts={counts}
+              onCategory={changeCategory}
               selectedId={selectedRow?.finding.id ?? null}
               checked={checked}
               applied={applied}
-              onToggleCategory={(c) => setFilters((f) => ({ ...f, categories: toggleIn(f.categories, c) }))}
-              onToggleSeverity={(s) => setFilters((f) => ({ ...f, severities: toggleIn(f.severities, s) }))}
-              onClearFilters={() => setFilters(EMPTY_FILTERS)}
               onSelect={setSelectedId}
               onToggleChecked={toggleChecked}
             />
@@ -152,23 +164,20 @@ export function ResultsScreen({ jobId, result, onNewAnalysis }: ResultsScreenPro
 }
 
 function ResultsHeader({ result, onNewAnalysis }: { result: AnalyzeResult; onNewAnalysis: () => void }) {
-  const tokens = result.token_usage.input_tokens + result.token_usage.output_tokens;
+  const { input_tokens, output_tokens } = result.token_usage;
+  const tokens = `${formatNumber(input_tokens + output_tokens)} token (girdi ${formatNumber(input_tokens)}, çıktı ${formatNumber(output_tokens)})`;
   return (
     <header className="flex h-12 shrink-0 items-center gap-3 border-b border-border px-4">
       <LogoMark size={22} />
-      <span className="truncate font-mono text-[13px]" title={result.root}>
+      <span className="min-w-0 truncate font-mono text-[13px]" title={result.root}>
         {result.root}
       </span>
-      <div className="ml-auto flex items-center gap-4 font-mono text-[11px] text-muted">
-        <span>{result.findings.length} bulgu</span>
-        <span>{result.suggestions.length} öneri</span>
-        <span title={`girdi ${formatNumber(result.token_usage.input_tokens)} · çıktı ${formatNumber(result.token_usage.output_tokens)}`}>
-          {formatNumber(tokens)} token
-        </span>
-        <Button size="sm" onClick={onNewAnalysis}>
-          Yeni analiz
-        </Button>
-      </div>
+      <span className="shrink-0 text-[12px] text-muted" title={tokens}>
+        · {result.findings.length} bulgu · {result.suggestions.length} öneri
+      </span>
+      <Button size="sm" className="ml-auto" onClick={onNewAnalysis}>
+        Yeni analiz
+      </Button>
     </header>
   );
 }

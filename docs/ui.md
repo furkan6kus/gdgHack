@@ -99,14 +99,15 @@ MockAdapter              CoreAdapter
 | Endpoint | Description |
 |---|---|
 | `GET /api/health` | `{status, adapter, api_key_configured}` |
-| `POST /api/analyze` `{path, verify}` | Start a job, returns `{job_id}` |
+| `POST /api/analyze` `{path, verify}` | Start a job on a folder or a single file, returns `{job_id}` |
 | `GET /api/analyze/{job_id}/events` | SSE stream: `progress`..., then `result` or `error` |
 | `POST /api/analyze/{job_id}/cancel` | Cancel a running job (204) |
-| `GET /api/browse?path=&show_hidden=` | List a directory (default: home) |
+| `GET /api/browse?path=&show_hidden=` | List a directory (default: home; a file path lists its folder) |
+| `GET /api/places` | Picker quick access: home, Desktop/Documents/Downloads (incl. OneDrive and Turkish names), drives |
 | `POST /api/apply` `{job_id, suggestion_ids}` | Apply passed suggestions; returns `{applied_ids, changed_files, backup_path}` |
 
 Errors always have the body `{"code": "...", "message": "..."}`. Common codes:
-`path_not_found` (404), `not_a_directory`, `path_denied` (403),
+`path_not_found` (404), `path_denied` (403),
 `invalid_request` (422), `unsupported_media_type` (415), `job_not_found` (404),
 `job_not_finished` (409), `unknown_suggestion`, `not_verified`,
 `already_applied` (409), `api_key_missing`, `analyzer_failed`, `cancelled`.
@@ -157,8 +158,13 @@ Shortcuts are ignored while typing in an input or when focus is inside the diff 
 
 ## 13. UI behaviour notes
 
+- Results are two columns: suggestions grouped by file (left) and detail + side-by-side diff (right).
+  Findings without a suggestion live in a collapsed "Önerisiz bulgular" section.
+- The picker ("Gözat…") has a quick-access sidebar and can select a folder **or a single file**
+  (click a file, then "Bu dosyayı seç", or double-click it). Browsing a file path lists its folder.
+
 - Category chips: `HATA` = bug, `PERF` = perf, `STİL` = style (shrink/translate are not shown for analyze).
-  Severity chips use *Ciddi / Uyarı / Bilgi* so that "Hata" is not ambiguous.
+  There is no severity filter; severity is the coloured bar on each row (*Ciddi / Uyarı / Bilgi* on hover).
 - ⚠ (skipped) suggestions are listed with their explanation and diff but cannot be selected or applied.
 - With "Doğrulama yapma" on, every suggestion is ⚠ skipped, so nothing can be applied in that run.
 - Mock demo states: `MYTOOL_UI_MOCK_SCENARIO=empty|error|no_key python -m server`.

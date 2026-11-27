@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 
@@ -42,6 +44,12 @@ class BrowseResponse(BaseModel):
     path: str
     parent: str | None
     entries: list[BrowseEntry]
+
+
+class Place(BaseModel):
+    name: str
+    path: str
+    kind: Literal["home", "folder", "drive"]
 
 
 class HealthResponse(BaseModel):

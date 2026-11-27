@@ -39,8 +39,6 @@ export const SEVERITY_LABELS: Record<Severity, string> = {
   info: 'Bilgi',
 };
 
-export const SEVERITY_ORDER: Severity[] = ['error', 'warning', 'info'];
-
 export const SEVERITY_TEXT: Record<Severity, string> = {
   error: 'text-err',
   warning: 'text-warn',

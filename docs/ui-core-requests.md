@@ -123,3 +123,16 @@ The server runs one pipeline call per job in a worker thread, and two jobs may
 overlap if the user starts a new analysis right after cancelling. Please avoid
 module-level mutable state in the pipeline (shared clients are fine if they are
 thread-safe; the Anthropic SDK client is).
+
+## 10. 🟨 Short title on `Suggestion` + single-file analysis
+
+- **Title.** Result rows show a short, human title instead of the raw analyzer
+  message (ruff messages are English, the UI is Turkish). The UI reads an optional
+  `Suggestion.title: str | None` (≤ ~70 chars, same language as `explanation`). It
+  has already been added to the temporary `server/contracts.py`. Ask the LLM for it
+  in the same call that produces the explanation. If it is missing, the UI falls
+  back to `Finding.message`.
+- **Single file.** The folder picker can now pick a single file as well as a folder.
+  `POST /api/analyze` passes that path through unchanged. Please let `analyze(root)`
+  accept a file path (ruff accepts both). Backups for a single file go to
+  `<file's folder>/.mytool/backup/`.

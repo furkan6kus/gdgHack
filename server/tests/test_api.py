@@ -33,12 +33,11 @@ def test_analyze_missing_path(client: TestClient, project: Path) -> None:
     assert response.json()["code"] == "path_not_found"
 
 
-def test_analyze_file_path(client: TestClient, project: Path) -> None:
+def test_analyze_single_file(client: TestClient, project: Path) -> None:
     file = project / "a.py"
     file.write_text("x = 1\n")
-    response = client.post("/api/analyze", json={"path": str(file)})
-    assert response.status_code == 400
-    assert response.json()["code"] == "not_a_directory"
+    _, events = run_job(client, file)
+    assert events[-1][0] == "result"
 
 
 def test_analyze_requires_json(client: TestClient, project: Path) -> None:

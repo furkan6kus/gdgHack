@@ -8,6 +8,10 @@ import { Button, Switch } from '../components/ui';
 import { APP_NAME, MAX_RECENT_PATHS, STORAGE_KEYS } from '../config';
 import { readJson, writeJson } from '../lib/storage';
 
+const PATH_PLACEHOLDER = navigator.userAgent.includes('Windows')
+  ? 'C:\\Users\\kullanici\\projem'
+  : '/home/kullanici/projem';
+
 interface HomeScreenProps {
   health: HealthResponse | null;
   healthError: ErrorPayload | null;
@@ -77,14 +81,14 @@ export function HomeScreen({ health, healthError, startError, starting, onStart 
 
         <form onSubmit={submit} className="rounded-xl border border-border bg-panel p-4 shadow-xl shadow-black/30">
           <label htmlFor="path" className="mb-2 block text-xs font-medium text-muted">
-            Analiz edilecek proje klasörü
+            Analiz edilecek klasör veya dosya
           </label>
           <div className="flex gap-2">
             <input
               id="path"
               value={path}
               onChange={(e) => setPath(e.target.value)}
-              placeholder="/home/kullanici/projem"
+              placeholder={PATH_PLACEHOLDER}
               autoFocus
               spellCheck={false}
               className="h-9 min-w-0 flex-1 rounded-md border border-border bg-bg px-3 font-mono text-sm outline-none transition-colors placeholder:text-muted/50 focus:border-accent"
