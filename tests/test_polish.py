@@ -9,7 +9,7 @@ import pytest
 from fakes import FakeLLM
 from test_explain import SMALL, _whole
 from test_optimize import FAST, _llm
-from test_profiling import make_project as make_slow_project
+from test_optimize import make_project as make_slow_project
 from test_shrink import LONG, SHORT
 from test_shrink import _llm as shrink_llm
 from test_shrink import make_project as make_shrink_project
