@@ -85,6 +85,13 @@ class Finding(BaseModel):
     symbol: str | None = None
 
 
+def _lines_with_eol(text: str) -> list[str]:
+    lines = text.splitlines(keepends=True)
+    if lines and not lines[-1].endswith(("\n", "\r")):
+        lines[-1] += "\n"
+    return lines
+
+
 class Patch(BaseModel):
     model_config = ConfigDict(frozen=True)
 
@@ -96,8 +103,8 @@ class Patch(BaseModel):
     def unified_diff(self, context: int = 3) -> str:
         name = self.file.as_posix()
         diff = difflib.unified_diff(
-            self.original.splitlines(keepends=True),
-            self.new.splitlines(keepends=True),
+            _lines_with_eol(self.original),
+            _lines_with_eol(self.new),
             fromfile=f"a/{name}",
             tofile=f"b/{name}",
             n=context,

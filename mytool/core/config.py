@@ -6,7 +6,7 @@ import os
 from collections.abc import Iterable, Mapping
 from fnmatch import fnmatch
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict
 
@@ -28,7 +28,8 @@ class Config(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     model: str = DEFAULT_MODEL
-    max_tokens_per_request: int = 4096
+    max_tokens_per_request: int = 16000
+    effort: Literal["low", "medium", "high"] = "medium"
     max_findings: int = 20
     subprocess_timeout_s: int = 60
     verify: bool = True

@@ -13,8 +13,9 @@ from rich.console import Console
 
 from mytool import __version__
 from mytool.cli.render import render_reports
-from mytool.core.config import Config, load_config
-from mytool.core.pipeline import analyze_static
+from mytool.core.config import Config, has_api_key, load_config
+from mytool.core.llm import AnthropicLLM, LLMClient
+from mytool.core.pipeline import analyze
 
 app = typer.Typer(
     name="mytool",
@@ -34,6 +35,10 @@ ModelOpt = Annotated[str | None, typer.Option("--model", help="LLM model name.")
 MaxFindingsOpt = Annotated[
     int | None, typer.Option("--max-findings", min=1, help="Max findings sent to the LLM.")
 ]
+MaxTokensOpt = Annotated[
+    int | None, typer.Option("--max-tokens", min=1, help="Max output tokens per LLM request.")
+]
+StaticOpt = Annotated[bool, typer.Option("--static", help="Skip the LLM, static findings only.")]
 VerboseOpt = Annotated[bool, typer.Option("--verbose", help="Verbose output.")]
 
 
@@ -81,8 +86,22 @@ def _prepare(
     return config
 
 
-@app.command()
-def analyze(
+def _make_llm(config: Config) -> LLMClient:
+    return AnthropicLLM(config)
+
+
+def _choose_llm(config: Config, static: bool, out: Console) -> LLMClient | None:
+    if static:
+        return None
+    if not has_api_key():
+        out.print("[yellow]ANTHROPIC_API_KEY tanımlı değil, yalnız statik bulgular gösteriliyor[/]")
+        return None
+    out.print("[dim]Not: ilgili kod parçaları Anthropic API'ye gönderilir.[/]")
+    return _make_llm(config)
+
+
+@app.command(name="analyze")
+def analyze_command(
     path: PathArg,
     diff: DiffOpt = False,
     fix: FixOpt = False,
@@ -90,18 +109,26 @@ def analyze(
     no_verify: NoVerifyOpt = False,
     model: ModelOpt = None,
     max_findings: MaxFindingsOpt = None,
+    max_tokens: MaxTokensOpt = None,
+    static: StaticOpt = False,
     verbose: VerboseOpt = False,
 ) -> None:
     """Run static analysis and suggest verified patches."""
     if not path.exists():
         err_console.print(f"[red]Error:[/] path not found: {path}")
         raise typer.Exit(2)
-    config = load_config(model=model, max_findings=max_findings, verify=not no_verify)
-    run = analyze_static(path, config)
+    config = load_config(
+        model=model,
+        max_findings=max_findings,
+        max_tokens_per_request=max_tokens,
+        verify=not no_verify,
+    )
+    llm = _choose_llm(config, static, err_console if json_out else console)
+    run = analyze(path, config, llm)
     if json_out:
         typer.echo(run.model_dump_json(indent=2))
     else:
-        render_reports(console, run, Path.cwd())
+        render_reports(console, run, Path.cwd(), diff_only=diff, verbose=verbose)
     if run.errors:
         raise typer.Exit(3)
 

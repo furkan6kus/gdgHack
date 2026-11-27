@@ -8,7 +8,8 @@ from mytool.core.config import DENY_PATTERNS, has_api_key, is_denied, load_confi
 def test_defaults() -> None:
     config = load_config({})
     assert config.model == "claude-sonnet-5-5"
-    assert config.max_tokens_per_request == 4096
+    assert config.max_tokens_per_request == 16000
+    assert config.effort == "medium"
     assert config.max_findings == 20
     assert config.subprocess_timeout_s == 60
     assert config.verify is True

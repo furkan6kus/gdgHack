@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "Static analysis + LLM patch suggestions with verification."
 requires-python = ">=3.11"
 dependencies = [
+    "anthropic>=2.14.0",
     "pydantic>=2",
     "rich>=15.0.0",
     "ruff>=0.17.6",
