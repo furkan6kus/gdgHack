@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from collections import defaultdict
 from collections.abc import Iterator, Sequence
 from contextlib import ExitStack
@@ -125,7 +126,14 @@ def analyze_static(
     )
     kept, hidden = _cap(findings, cfg.max_findings)
     groups = _group_by_file(kept, files)
-    reports = [Report(file=p, findings=_with_symbols(p, groups.get(p, []))) for p in files]
+    reports = [
+        Report(
+            file=p,
+            findings=_with_symbols(p, groups.get(p, [])),
+            content_sha256=hashlib.sha256(p.read_bytes()).hexdigest(),
+        )
+        for p in files
+    ]
     return AnalysisRun(reports=reports, errors=errors, skipped=skipped, truncated=hidden)
 
 

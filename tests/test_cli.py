@@ -1,3 +1,4 @@
+import hashlib
 import io
 import json
 import re
@@ -13,7 +14,19 @@ from mytool.cli.main import app
 from mytool.core.analyzers.base import AnalyzerError
 from mytool.core.config import Config
 from mytool.core.llm import LLMClient, LLMFix, LLMRequest, LLMUnitResponse
-from mytool.core.models import AnalysisRun, Category, Finding, TokenUsage
+from mytool.core.models import (
+    AnalysisRun,
+    Category,
+    Finding,
+    LineRange,
+    Patch,
+    Report,
+    Suggestion,
+    TokenUsage,
+    VerificationResult,
+    VerifyMethod,
+    VerifyStatus,
+)
 from mytool.core.pipeline import analyze
 
 FIXTURE = Path(__file__).parent / "fixtures" / "sample.py"
@@ -70,8 +83,9 @@ def test_analyze_json() -> None:
     result = runner.invoke(app, ["analyze", str(FIXTURE), "--json"])
     assert result.exit_code == 0
     data = json.loads(result.stdout)
-    assert data["reports"][0]["findings"]
-    assert {f["rule"] for f in data["reports"][0]["findings"]} >= {"F401"}
+    assert data["apply"] is None
+    assert data["run"]["reports"][0]["findings"]
+    assert {f["rule"] for f in data["run"]["reports"][0]["findings"]} >= {"F401"}
 
 
 def test_analyzer_error_exit_3(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -185,7 +199,7 @@ def test_static_flag_never_calls_llm() -> None:
 def test_json_includes_suggestions() -> None:
     result = runner.invoke(app, ["analyze", str(FIXTURE), "--json", "--no-verify"])
     data = json.loads(result.stdout)
-    assert data["reports"][0]["suggestions"][0]["verification"]["status"] == "skipped"
+    assert data["run"]["reports"][0]["suggestions"][0]["verification"]["status"] == "skipped"
 
 
 class ScriptedLLM:
@@ -261,3 +275,127 @@ def test_warnings_do_not_cause_exit_3(monkeypatch: pytest.MonkeyPatch, tmp_path:
 def test_timeout_option_accepted() -> None:
     result = runner.invoke(app, ["analyze", str(FIXTURE), "--timeout", "30"])
     assert result.exit_code == 0
+
+
+ORIGINAL = "import os\n\n\ndef add(a, b):\n    return a + b\n"
+
+
+def _patch_analyze(
+    monkeypatch: pytest.MonkeyPatch, calc: Path, method: VerifyMethod = VerifyMethod.PYTEST
+) -> None:
+    patch = Patch(file=calc, original="import os\n", new="", lines=LineRange(start=1, end=1))
+    suggestion = Suggestion(
+        id="s1",
+        finding_ids=[],
+        category=Category.STYLE,
+        explanation="kullanilmayan import",
+        patch=patch,
+        verification=VerificationResult(status=VerifyStatus.PASSED, method=method),
+    )
+    report = Report(
+        file=calc,
+        suggestions=[suggestion],
+        content_sha256=hashlib.sha256(calc.read_bytes()).hexdigest(),
+    )
+    run = AnalysisRun(reports=[report])
+    monkeypatch.setattr(cli_main, "analyze", lambda target, cfg, llm: run.model_copy(deep=True))
+
+
+def _interactive(monkeypatch: pytest.MonkeyPatch, value: bool) -> None:
+    monkeypatch.setattr(cli_main, "_is_interactive", lambda: value)
+
+
+def test_fix_applies_eligible(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    calc = _tmp_project(tmp_path)
+    _patch_analyze(monkeypatch, calc)
+    result = runner.invoke(app, ["analyze", str(calc), "--fix", "--static"])
+    assert "1 öneri uygulandı. Yedek:" in result.output
+    assert not calc.read_text().startswith("import os")
+
+
+def test_fix_skips_syntax_only(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    calc = _tmp_project(tmp_path)
+    _patch_analyze(monkeypatch, calc, VerifyMethod.SYNTAX)
+    result = runner.invoke(app, ["analyze", str(calc), "--fix", "--static"])
+    assert "0 öneri uygulandı" in result.output
+    assert "yalnız sözdizimiyle doğrulandığı için" in result.output
+    assert calc.read_text() == ORIGINAL
+
+
+def test_fix_no_verify_message(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    calc = _tmp_project(tmp_path)
+    _patch_analyze(monkeypatch, calc)
+    result = runner.invoke(app, ["analyze", str(calc), "--fix", "--no-verify", "--static"])
+    assert "doğrulama gerektirir" in result.output
+    assert calc.read_text() == ORIGINAL
+
+
+def test_interactive_all(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    calc = _tmp_project(tmp_path)
+    _patch_analyze(monkeypatch, calc)
+    _interactive(monkeypatch, True)
+    result = runner.invoke(app, ["analyze", str(calc), "--static"], input="a\n")
+    assert "1 öneri uygulandı" in result.output
+    assert not calc.read_text().startswith("import os")
+
+
+def test_interactive_none(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    calc = _tmp_project(tmp_path)
+    _patch_analyze(monkeypatch, calc)
+    _interactive(monkeypatch, True)
+    result = runner.invoke(app, ["analyze", str(calc), "--static"], input="h\n")
+    assert "uygulandı" not in result.output
+    assert calc.read_text() == ORIGINAL
+
+
+def test_interactive_select(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    calc = _tmp_project(tmp_path)
+    _patch_analyze(monkeypatch, calc)
+    _interactive(monkeypatch, True)
+    no = runner.invoke(app, ["analyze", str(calc), "--static"], input="s\nn\n")
+    assert "uygulansın mı?" in no.output
+    assert calc.read_text() == ORIGINAL
+    yes = runner.invoke(app, ["analyze", str(calc), "--static"], input="s\ny\n")
+    assert "1 öneri uygulandı" in yes.output
+
+
+def test_non_interactive_no_prompt(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    calc = _tmp_project(tmp_path)
+    _patch_analyze(monkeypatch, calc)
+    _interactive(monkeypatch, False)
+    result = runner.invoke(app, ["analyze", str(calc), "--static"])
+    assert "Uygula?" not in result.output
+    assert calc.read_text() == ORIGINAL
+
+
+def test_json_fix_has_apply(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    calc = _tmp_project(tmp_path)
+    _patch_analyze(monkeypatch, calc)
+    result = runner.invoke(app, ["analyze", str(calc), "--json", "--fix", "--static"])
+    data = json.loads(result.stdout)
+    assert data["apply"]["outcomes"][0]["applied"] is True
+
+
+def test_undo_yes_restores(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    calc = _tmp_project(tmp_path)
+    _patch_analyze(monkeypatch, calc)
+    runner.invoke(app, ["analyze", str(calc), "--fix", "--static"])
+    result = runner.invoke(app, ["undo", str(tmp_path), "--yes"])
+    assert result.exit_code == 0
+    assert calc.read_text() == ORIGINAL
+
+
+def test_undo_non_tty_needs_yes(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    calc = _tmp_project(tmp_path)
+    _patch_analyze(monkeypatch, calc)
+    runner.invoke(app, ["analyze", str(calc), "--fix", "--static"])
+    _interactive(monkeypatch, False)
+    result = runner.invoke(app, ["undo", str(tmp_path)])
+    assert result.exit_code == 2
+    assert not calc.read_text().startswith("import os")
+
+
+def test_undo_no_backup(tmp_path: Path) -> None:
+    _tmp_project(tmp_path)
+    result = runner.invoke(app, ["undo", str(tmp_path), "--yes"])
+    assert result.exit_code == 1

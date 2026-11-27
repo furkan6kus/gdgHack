@@ -167,6 +167,7 @@ class Report(BaseModel):
     findings: list[Finding] = Field(default_factory=list)
     suggestions: list[Suggestion] = Field(default_factory=list)
     usage: TokenUsage = Field(default_factory=TokenUsage)
+    content_sha256: str = ""
 
     def visible_suggestions(self) -> list[Suggestion]:
         return [s for s in self.suggestions if s.presentable]
@@ -185,3 +186,23 @@ class AnalysisRun(BaseModel):
         for report in self.reports:
             total = total.add(report.usage)
         return total
+
+
+class ApplyOutcome(BaseModel):
+    suggestion_id: str
+    file: Path
+    applied: bool
+    reason: str = ""
+
+
+class ApplyResult(BaseModel):
+    outcomes: list[ApplyOutcome] = Field(default_factory=list)
+    backup_dir: Path | None = None
+
+    @property
+    def applied_count(self) -> int:
+        return sum(1 for o in self.outcomes if o.applied)
+
+    @property
+    def skipped(self) -> list[ApplyOutcome]:
+        return [o for o in self.outcomes if not o.applied]
