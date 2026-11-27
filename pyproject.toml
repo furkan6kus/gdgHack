@@ -6,6 +6,9 @@ requires-python = ">=3.11"
 dependencies = [
     "pydantic>=2",
     "rich>=15.0.0",
+    "ruff>=0.17.6",
+    "tree-sitter>=0.27.0",
+    "tree-sitter-python>=0.25.0",
     "typer>=0.29.3",
 ]
 
@@ -21,12 +24,15 @@ packages = ["mytool"]
 
 [tool.ruff]
 line-length = 100
+extend-exclude = ["tests/fixtures"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+ignore = ["RUF001", "RUF002", "RUF003"]
 
 [tool.mypy]
 strict = true
+exclude = ["tests/fixtures"]
 plugins = ["pydantic.mypy"]
 
 [dependency-groups]

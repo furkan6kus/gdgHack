@@ -54,6 +54,21 @@ class LineRange(BaseModel):
         return end
 
 
+class UnitKind(StrEnum):
+    FUNCTION = "function"
+    METHOD = "method"
+    CLASS = "class"
+
+
+class CodeUnit(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    name: str
+    kind: UnitKind
+    lines: LineRange
+    source: str
+
+
 class Finding(BaseModel):
     model_config = ConfigDict(frozen=True)
 
@@ -66,6 +81,8 @@ class Finding(BaseModel):
     rule: str
     message: str
     fix_available: bool = False
+    category: Category = Category.STYLE
+    symbol: str | None = None
 
 
 class Patch(BaseModel):
@@ -131,6 +148,7 @@ class Report(BaseModel):
     suggestions: list[Suggestion] = Field(default_factory=list)
     usage: TokenUsage = Field(default_factory=TokenUsage)
     errors: list[str] = Field(default_factory=list)
+    skipped: list[str] = Field(default_factory=list)
 
     def visible_suggestions(self) -> list[Suggestion]:
         return [s for s in self.suggestions if s.presentable]

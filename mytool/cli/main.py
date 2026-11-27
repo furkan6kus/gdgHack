@@ -10,7 +10,9 @@ import typer
 from rich.console import Console
 
 from mytool import __version__
+from mytool.cli.render import render_reports
 from mytool.core.config import Config, load_config
+from mytool.core.pipeline import analyze_static
 
 app = typer.Typer(
     name="mytool",
@@ -82,15 +84,19 @@ def analyze(
     verbose: VerboseOpt = False,
 ) -> None:
     """Run static analysis and suggest verified patches."""
-    _prepare(
-        "analyze",
-        path,
-        2,
-        json_out=json_out,
-        no_verify=no_verify,
-        model=model,
-        max_findings=max_findings,
-    )
+    if not path.exists():
+        err_console.print(f"[red]Error:[/] path not found: {path}")
+        raise typer.Exit(2)
+    config = load_config(model=model, max_findings=max_findings, verify=not no_verify)
+    reports = analyze_static(path, config)
+    if json_out:
+        typer.echo(
+            json.dumps([r.model_dump(mode="json") for r in reports], ensure_ascii=False, indent=2)
+        )
+    else:
+        render_reports(console, reports, Path.cwd())
+    if any(r.errors for r in reports):
+        raise typer.Exit(3)
 
 
 @app.command()
