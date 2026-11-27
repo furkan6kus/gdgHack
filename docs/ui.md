@@ -45,7 +45,12 @@ cd web && npm run build
 cd .. && python -m server
 ```
 
-Opens http://127.0.0.1:8765 (API and built frontend from one process).
+Opens http://127.0.0.1:8765 (API and built frontend from one process). The
+browser opens only once the server accepts connections; if `web/dist` is missing
+the page explains how to build it. Use `--port` if 8765 is taken.
+
+> `web/dist` is a build artifact and is not committed: run the build once after
+> cloning or pulling frontend changes.
 
 ## 6. Configuration
 

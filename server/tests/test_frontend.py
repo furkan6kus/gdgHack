@@ -4,6 +4,7 @@ from fastapi.testclient import TestClient
 
 from server.adapters.mock import MockAdapter
 from server.app import create_app
+
 from .conftest import ClientFactory
 
 
