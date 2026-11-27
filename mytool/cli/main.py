@@ -73,6 +73,12 @@ MaxFindingsOpt = Annotated[
 MaxTokensOpt = Annotated[
     int | None, typer.Option("--max-tokens", min=1, help="İstek başına en çok çıkış tokeni.")
 ]
+MaxCostOpt = Annotated[
+    float | None,
+    typer.Option(
+        "--max-cost", min=0.0, help="Analiz başına harcama sınırı (USD, tahmini). Varsayılan 0.50."
+    ),
+]
 StaticOpt = Annotated[bool, typer.Option("--static", help="LLM kullanma, yalnız statik bulgular.")]
 TimeoutOpt = Annotated[
     int | None, typer.Option("--timeout", min=1, help="Alt süreç zaman aşımı (saniye).")
@@ -163,6 +169,7 @@ def analyze_command(
     model: ModelOpt = None,
     max_findings: MaxFindingsOpt = None,
     max_tokens: MaxTokensOpt = None,
+    max_cost: MaxCostOpt = None,
     static: StaticOpt = False,
     timeout: TimeoutOpt = None,
     verbose: VerboseOpt = False,
@@ -173,6 +180,7 @@ def analyze_command(
     config = load_config(
         model=model,
         max_findings=max_findings,
+        max_cost_usd=max_cost,
         max_tokens_per_request=max_tokens,
         verify=not no_verify,
         subprocess_timeout_s=timeout,

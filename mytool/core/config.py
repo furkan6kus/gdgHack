@@ -11,6 +11,8 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict
 
 DEFAULT_MODEL = "claude-sonnet-5-5"
+# Tahmini harcama bu tutara (USD, analiz başına) ulaşınca yeni LLM isteği gönderilmez.
+DEFAULT_MAX_COST_USD = 0.50
 
 DENY_PATTERNS: tuple[str, ...] = (
     ".env",
@@ -31,6 +33,7 @@ class Config(BaseModel):
     max_tokens_per_request: int = 16000
     effort: Literal["low", "medium", "high"] = "medium"
     max_findings: int = 20
+    max_cost_usd: float = DEFAULT_MAX_COST_USD
     subprocess_timeout_s: int = 60
     verify: bool = True
     deny_patterns: tuple[str, ...] = DENY_PATTERNS
@@ -41,6 +44,11 @@ def load_config(env: Mapping[str, str] | None = None, **overrides: Any) -> Confi
     values: dict[str, Any] = {}
     if env.get("MYTOOL_MODEL"):
         values["model"] = env["MYTOOL_MODEL"]
+    if env.get("MYTOOL_MAX_COST"):
+        try:
+            values["max_cost_usd"] = float(env["MYTOOL_MAX_COST"].replace(",", "."))
+        except ValueError as exc:
+            raise ValueError(f"MYTOOL_MAX_COST sayı olmalı: {env['MYTOOL_MAX_COST']!r}") from exc
     values.update({k: v for k, v in overrides.items() if v is not None})
     return Config(**values)
 

@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from mytool.core.analyzers.base import AnalyzerError
+from mytool.core.analyzers.messages_tr import translate
 from mytool.core.models import Category, Finding, LineRange, Severity
 
 _ERROR_CODES = {"F821", "F822", "F823"}
@@ -55,7 +56,7 @@ def _to_finding(item: dict[str, Any]) -> Finding:
         column=col,
         severity=severity_for(code),
         rule=rule,
-        message=item["message"],
+        message=translate(code, item["message"]),
         fix_available=item.get("fix") is not None,
         category=category_for(code),
     )

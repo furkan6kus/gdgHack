@@ -4,7 +4,7 @@ import { api, toErrorPayload } from '../../api/client';
 import type { AnalyzeResult, ApplyResponse, ErrorPayload, Suggestion } from '../../api/types';
 import { LogoMark } from '../../components/Logo';
 import { StateMessage } from '../../components/StateMessage';
-import { Button, CARD, StatBadge } from '../../components/ui';
+import { Button, CARD, Callout, StatBadge } from '../../components/ui';
 import { useHotkeys } from '../../hooks/useHotkeys';
 import { formatNumber } from '../../lib/labels';
 import { ApplyBar, ConfirmApplyModal } from './ApplyControls';
@@ -106,6 +106,15 @@ export function ResultsScreen({ jobId, result, onNewAnalysis }: ResultsScreenPro
   return (
     <div className="flex h-full flex-col">
       <ResultsHeader result={result} onNewAnalysis={onNewAnalysis} />
+      {(result.warnings?.length ?? 0) > 0 && (
+        <div className="shrink-0 px-4 pt-3 sm:px-6">
+          <Callout tone="warn">
+            <ul className="space-y-1 text-sm">
+              {result.warnings?.map((w, i) => <li key={i}>{w}</li>)}
+            </ul>
+          </Callout>
+        </div>
+      )}
       {result.findings.length === 0 ? (
         <div className="flex flex-1 items-center justify-center">
           <StateMessage
@@ -167,7 +176,9 @@ export function ResultsScreen({ jobId, result, onNewAnalysis }: ResultsScreenPro
 
 function ResultsHeader({ result, onNewAnalysis }: { result: AnalyzeResult; onNewAnalysis: () => void }) {
   const { input_tokens, output_tokens } = result.token_usage;
-  const tokens = `${formatNumber(input_tokens + output_tokens)} token (girdi ${formatNumber(input_tokens)}, çıktı ${formatNumber(output_tokens)})`;
+  const cost = result.estimated_cost_usd;
+  const costText = cost != null ? ` · tahmini maliyet ${formatUsd(cost)}` : '';
+  const tokens = `${formatNumber(input_tokens + output_tokens)} token (girdi ${formatNumber(input_tokens)}, çıktı ${formatNumber(output_tokens)})${costText}`;
   return (
     <header className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-3 border-b border-border/80 px-4 py-4 sm:px-6">
       <LogoMark size={28} />
@@ -181,12 +192,21 @@ function ResultsHeader({ result, onNewAnalysis }: { result: AnalyzeResult; onNew
         <StatBadge dot="bg-ok">
           Öneriler: <b className="font-semibold text-strong">{result.suggestions.length}</b>
         </StatBadge>
+        {cost != null && (
+          <StatBadge>
+            Tahmini maliyet: <b className="font-semibold text-strong">{formatUsd(cost)}</b>
+          </StatBadge>
+        )}
       </div>
       <Button size="sm" onClick={onNewAnalysis}>
         Yeni analiz
       </Button>
     </header>
   );
+}
+
+function formatUsd(value: number): string {
+  return '$' + value.toFixed(value < 0.01 ? 4 : 2);
 }
 
 function AppliedToast({ response, onClose }: { response: ApplyResponse | null; onClose: () => void }) {

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import socket
 import sys
 import threading
@@ -15,10 +16,26 @@ STARTUP_TIMEOUT_S = 15.0
 
 
 def _parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(prog="python -m server", description="mytool UI")
-    parser.add_argument("--port", type=int, default=DEFAULT_PORT)
-    parser.add_argument("--no-browser", action="store_true", help="do not open a browser")
-    return parser.parse_args()
+    parser = argparse.ArgumentParser(prog="python -m server", description="mytool web arayüzü")
+    parser.add_argument("--port", type=int, default=DEFAULT_PORT, help="sunucu portu")
+    parser.add_argument("--no-browser", action="store_true", help="tarayıcıyı açma")
+    parser.add_argument(
+        "--model", help="öneriler için LLM modeli (ör. claude-haiku-5-5); MYTOOL_MODEL yerine"
+    )
+    parser.add_argument(
+        "--max-cost",
+        type=float,
+        help="analiz başına harcama sınırı, USD (varsayılan 0.50); MYTOOL_MAX_COST yerine",
+    )
+    args = parser.parse_args()
+    # The core adapter reads its settings from the environment (load_config).
+    if args.model:
+        os.environ["MYTOOL_MODEL"] = args.model
+    if args.max_cost is not None:
+        if args.max_cost < 0:
+            parser.error("--max-cost negatif olamaz")
+        os.environ["MYTOOL_MAX_COST"] = str(args.max_cost)
+    return args
 
 
 def _port_is_free(port: int) -> bool:
@@ -45,6 +62,23 @@ def _open_when_ready(url: str, port: int) -> None:
         print(f"Tarayıcı otomatik açılamadı. Bu adresi elle açın: {url}")
 
 
+def _print_settings() -> None:
+    if os.environ.get("MYTOOL_UI_ADAPTER", "core").strip().lower() == "mock":
+        print("Adaptör: mock (sahte veri, API çağrısı yapılmaz)")
+        return
+    from mytool.core.config import has_api_key, load_config
+
+    try:
+        cfg = load_config()
+    except ValueError as exc:
+        sys.exit(str(exc))
+    key = "tanımlı" if has_api_key() else "TANIMLI DEĞİL"
+    print(
+        f"Model: {cfg.model} · harcama sınırı: ${cfg.max_cost_usd:.2f}/analiz · "
+        f"ANTHROPIC_API_KEY: {key}"
+    )
+
+
 def main() -> None:
     args = _parse_args()
     try:
@@ -63,6 +97,7 @@ def main() -> None:
     if not (DEFAULT_DIST / "index.html").is_file():
         print("Uyarı: web/dist bulunamadı. Önce `cd web && npm ci && npm run build` çalıştırın.")
     print(f"mytool UI: {url}  (durdurmak için Ctrl+C)")
+    _print_settings()
     if not args.no_browser:
         threading.Thread(target=_open_when_ready, args=(url, args.port), daemon=True).start()
     uvicorn.run(create_app(), host=HOST, port=args.port, log_level="warning")

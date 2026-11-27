@@ -39,6 +39,7 @@ from mytool.core.models import (
     Severity,
     Stage,
     Suggestion,
+    TokenUsage,
     UnitExplanation,
     UnitKind,
     VerificationResult,
@@ -47,6 +48,7 @@ from mytool.core.models import (
 )
 from mytool.core.parser import def_line, unit_for_line
 from mytool.core.patching import PatchError, build_patch
+from mytool.core.pricing import estimate_cost
 from mytool.core.profiling import Workload, WorkloadError, hot_units, measure, profile
 from mytool.core.prompts import (
     EXPLAIN_SYSTEM,
@@ -318,12 +320,13 @@ def _suggest_for_report(
     plan: _Plan,
     llm: LLMClient,
     ids: Iterator[int],
-    before_group: Callable[[_Group], None],
+    before_group: Callable[[_Group], bool],
 ) -> bool:
-    """Returns False when a fatal LLM error means the remaining calls should be skipped."""
+    """Returns False when the remaining calls should be skipped (fatal LLM error or budget)."""
     report, text_lines = plan.report, plan.text_lines
     for group in plan.groups:
-        before_group(group)
+        if not before_group(group):
+            return False
         source = "".join(text_lines[group.start - 1 : group.end])
         try:
             _handle_group(run, report, group, source, llm, ids)
@@ -382,15 +385,34 @@ def _verify_suggestions(run: AnalysisRun, cfg: Config, progress: Progress = _SIL
                 report.suggestions[index] = suggestion.model_copy(update={"verification": result})
 
 
-def _suggest_all(run: AnalysisRun, llm: LLMClient, progress: Progress) -> None:
+def _over_budget(run: AnalysisRun, cfg: Config) -> bool:
+    cost = estimate_cost(cfg.model, run.usage)
+    return cost is not None and cost >= cfg.max_cost_usd
+
+
+def _suggest_all(run: AnalysisRun, cfg: Config, llm: LLMClient, progress: Progress) -> None:
     plans = [_plan(report) for report in run.reports if report.findings]
     total = sum(len(plan.groups) for plan in plans)
     step, ids = count(1), count(1)
+    if estimate_cost(cfg.model, TokenUsage()) is None:
+        run.warnings.append(
+            f"'{cfg.model}' modelinin fiyatı bilinmiyor; harcama sınırı uygulanamadı."
+        )
 
-    def before_group(group: _Group) -> None:
+    def before_group(group: _Group) -> bool:
+        current = next(step)
+        if _over_budget(run, cfg):
+            spent = estimate_cost(cfg.model, run.usage) or 0.0
+            run.warnings.append(
+                f"Harcama sınırına ulaşıldı (tahmini ${spent:.2f} / sınır "
+                f"${cfg.max_cost_usd:.2f}); kalan {total - current + 1} kod parçası "
+                "için öneri istenmedi."
+            )
+            return False
         rules = ", ".join(sorted({f.rule for f in group.findings}))
         where = group.unit_name or f"satır {group.start}-{group.end}"
-        progress.emit(Stage.LLM, f"{where}: {rules} için öneri isteniyor", next(step), total)
+        progress.emit(Stage.LLM, f"{where}: {rules} için öneri isteniyor", current, total)
+        return True
 
     for plan in plans:
         if not _suggest_for_report(run, plan, llm, ids, before_group):
@@ -414,7 +436,7 @@ def analyze(
     progress = Progress(on_progress, should_cancel)
     run = analyze_static(target, cfg, analyzers, progress)
     if llm is not None:
-        _suggest_all(run, llm, progress)
+        _suggest_all(run, cfg, llm, progress)
         _verify_suggestions(run, cfg, progress)
     progress.emit(Stage.DONE, "analiz tamamlandı")
     return run

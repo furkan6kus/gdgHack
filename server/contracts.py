@@ -97,6 +97,8 @@ class AnalyzeResult(BaseModel):
     findings: list[Finding]
     suggestions: list[Suggestion]
     token_usage: TokenUsage = Field(default_factory=TokenUsage)
+    estimated_cost_usd: float | None = None
+    warnings: list[str] = Field(default_factory=list)
 
 
 class ProgressEvent(BaseModel):

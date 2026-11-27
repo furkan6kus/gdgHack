@@ -63,6 +63,10 @@ export interface AnalyzeResult {
   findings: Finding[];
   suggestions: Suggestion[];
   token_usage: TokenUsage;
+  /** Estimated USD cost of the LLM calls; null when the model price is unknown. */
+  estimated_cost_usd?: number | null;
+  /** Non-fatal notes from the core (spending limit reached, patch mismatch...). Turkish. */
+  warnings?: string[];
 }
 
 export interface ProgressEvent {

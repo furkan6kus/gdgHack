@@ -21,6 +21,7 @@ from mytool.core.apply import apply_suggestions, fix_eligible
 from mytool.core.config import Config, load_config
 from mytool.core.llm import AnthropicLLM, LLMClient
 from mytool.core.pipeline import Cancelled, analyze
+from mytool.core.pricing import estimate_cost
 from mytool.core.verify import find_project_root
 
 from server.adapters.base import ApplyOutcome, ProgressCallback
@@ -88,7 +89,7 @@ class CoreAdapter:
             raise AdapterError(ANALYSIS_FAILED, " · ".join(run.errors), status_code=500)
         token = uuid.uuid4().hex[:8]
         self._remember(token, run)
-        return to_ui_result(root, run, token)
+        return to_ui_result(root, run, token, model=cfg.model)
 
     def apply(self, root: Path, suggestions: list[Suggestion]) -> ApplyOutcome:
         token = _token_of(suggestions)
@@ -123,7 +124,9 @@ class CoreAdapter:
 # --------------------------------------------------------------------------- conversion
 
 
-def to_ui_result(root: Path, run: core.AnalysisRun, token: str) -> AnalyzeResult:
+def to_ui_result(
+    root: Path, run: core.AnalysisRun, token: str, *, model: str | None = None
+) -> AnalyzeResult:
     base = _base_dir(root)
     findings = [_finding(f, base) for r in run.reports for f in r.findings]
     suggestions = [
@@ -139,6 +142,8 @@ def to_ui_result(root: Path, run: core.AnalysisRun, token: str) -> AnalyzeResult
         findings=findings,
         suggestions=suggestions,
         token_usage=TokenUsage(input_tokens=usage.input_tokens, output_tokens=usage.output_tokens),
+        estimated_cost_usd=estimate_cost(model, usage) if model else None,
+        warnings=list(run.warnings),
     )
 
 
