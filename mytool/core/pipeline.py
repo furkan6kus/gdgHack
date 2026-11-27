@@ -32,25 +32,29 @@ from mytool.core.models import (
     ExplainResult,
     FileExplanation,
     Finding,
+    Patch,
     ProfileEntry,
     Report,
     Severity,
     Suggestion,
     UnitExplanation,
+    UnitKind,
     VerificationResult,
     VerifyMethod,
     VerifyStatus,
 )
-from mytool.core.parser import unit_for_line
+from mytool.core.parser import def_line, unit_for_line
 from mytool.core.patching import PatchError, build_patch
 from mytool.core.profiling import Workload, WorkloadError, hot_units, measure, profile
 from mytool.core.prompts import (
     EXPLAIN_SYSTEM,
     FIX_SYSTEM,
     OPTIMIZE_SYSTEM,
+    SHRINK_SYSTEM,
     build_explain_prompt,
     build_fix_prompt,
     build_optimize_prompt,
+    build_shrink_prompt,
     build_summary_prompt,
     build_unit_prompt,
 )
@@ -67,8 +71,10 @@ SKIP_DIRS = frozenset(
 )
 WINDOW = 15
 EXPLAIN_WHOLE_FILE_LINES = 400
+SHRINK_MIN_LINES = 8
+SHRINK_MAX_LINE = 100
 NO_PROFILE_DATA = "profil verisi yok: --bench ile bir benchmark betiği ver"
-_MAIN_GUARD = re.compile(r"^if\s+__name__\s*==\s*[\"']__main__[\"']\s*:", re.MULTILINE)
+MAIN_GUARD = re.compile(r"^if\s+__name__\s*==\s*[\"']__main__[\"']\s*:", re.MULTILINE)
 _SEVERITY_ORDER = {Severity.ERROR: 0, Severity.WARNING: 1, Severity.INFO: 2}
 
 
@@ -333,7 +339,7 @@ def analyze(
     return run
 
 
-def _top_level(units: list[CodeUnit]) -> list[CodeUnit]:
+def top_level(units: list[CodeUnit]) -> list[CodeUnit]:
     return [
         u
         for u in units
@@ -344,7 +350,7 @@ def _top_level(units: list[CodeUnit]) -> list[CodeUnit]:
     ]
 
 
-def _unit_code(text: str, unit: CodeUnit) -> str:
+def unit_code(text: str, unit: CodeUnit) -> str:
     lines = text.splitlines(keepends=True)
     return "".join(lines[unit.lines.start - 1 : unit.lines.end])
 
@@ -354,8 +360,8 @@ def _explain_units(
 ) -> list[UnitExplanation]:
     name = result.file.name
     explained: list[UnitExplanation] = []
-    for unit in _top_level(plugin.extract_units(text)):
-        code = number_lines(_unit_code(text, unit), unit.lines.start)
+    for unit in top_level(plugin.extract_units(text)):
+        code = number_lines(unit_code(text, unit), unit.lines.start)
         prompt = build_unit_prompt(name, plugin.name, unit.name, code)
         try:
             answer, usage = llm.structured(EXPLAIN_SYSTEM, prompt, UnitExplanation)
@@ -427,7 +433,7 @@ def _select_workload(ws: Workspace, file: Path, bench: Path | None, cfg: Config)
         return Workload(script=ws.path_for(bench))
     if tests_usable(ws, cfg):
         return Workload()
-    if _MAIN_GUARD.search(file.read_text(encoding="utf-8", errors="replace")):
+    if MAIN_GUARD.search(file.read_text(encoding="utf-8", errors="replace")):
         return Workload(script=ws.path_for(file))
     return None
 
@@ -443,7 +449,7 @@ def _suggest_for_unit(
     entries: list[ProfileEntry],
 ) -> bool:
     """Returns False after a fatal LLM error."""
-    code = _unit_code(source, unit)
+    code = unit_code(source, unit)
     own = [e for e in entries if unit.lines.start <= e.line <= unit.lines.end]
     prompt = build_optimize_prompt(
         report.file.name,
@@ -561,4 +567,83 @@ def optimize(file: Path, cfg: Config, llm: LLMClient, bench: Path | None = None)
                 _optimize_in(ws, run, report, plugin, cfg, llm, bench)
         except (WorkloadError, OSError) as exc:
             run.errors.append(f"{file.name}: {exc}")
+    return run
+
+
+def _inside(inner: CodeUnit, outer: CodeUnit) -> bool:
+    return outer.lines.start <= inner.lines.start and inner.lines.end <= outer.lines.end
+
+
+def _shrink_units(units: list[CodeUnit], limit: int) -> list[CodeUnit]:
+    """Outermost functions/methods with at least 8 lines, longest first."""
+    funcs = [u for u in units if u.kind != UnitKind.CLASS]
+    outer = [u for u in funcs if not any(o is not u and _inside(u, o) for o in funcs)]
+
+    def size(unit: CodeUnit) -> int:
+        return unit.lines.end - unit.lines.start + 1
+
+    long_units = [u for u in outer if size(u) >= SHRINK_MIN_LINES]
+    return sorted(long_units, key=lambda u: (-size(u), u.lines.start))[:limit]
+
+
+def _shrink_problem(patch: Patch) -> str | None:
+    if patch.line_delta >= 0:
+        return "daha kısa değil"
+    if any(len(line) > SHRINK_MAX_LINE for line in patch.new.splitlines()):
+        return f"{SHRINK_MAX_LINE} karakterden uzun satır var"
+    if def_line(patch.original) != def_line(patch.new):
+        return "imza değişti"
+    return None
+
+
+def _suggest_shrink(
+    run: AnalysisRun,
+    report: Report,
+    unit: CodeUnit,
+    source: str,
+    llm: LLMClient,
+    ids: Iterator[int],
+) -> bool:
+    """Returns False after a fatal LLM error."""
+    name = report.file.name
+    code = unit_code(source, unit)
+    numbered = number_lines(code, unit.lines.start)
+    prompt = build_shrink_prompt(name, "python", unit.name, unit.lines.start, numbered)
+    try:
+        response, usage = llm.structured(SHRINK_SYSTEM, prompt, LLMUnitResponse)
+    except LLMError as exc:
+        (run.errors if exc.fatal else run.warnings).append(f"{name}: {unit.name}: {exc}")
+        return not exc.fatal
+    report.usage = report.usage.add(usage)
+    fix = next((f for f in response.fixes if f.original), None)
+    if fix is None:
+        return True
+    fix = fix.model_copy(update={"category": Category.SHRINK, "finding_ids": []})
+    group = _Group(unit.name, unit.lines.start, unit.lines.end, [])
+    suggestion, error = _suggestion(ids, report.file, group, code, fix)
+    problem = error or (_shrink_problem(suggestion.patch) if suggestion.patch else None)
+    if problem:
+        run.warnings.append(f"{name}: {unit.name}: öneri atıldı ({problem})")
+    else:
+        report.suggestions.append(suggestion)
+    return True
+
+
+def shrink(file: Path, cfg: Config, llm: LLMClient) -> AnalysisRun:
+    """Ask the LLM for shorter equivalent versions of the longest functions, then verify."""
+    run = AnalysisRun()
+    plugin = plugin_for(file)
+    if is_denied(file, cfg.deny_patterns):
+        run.errors.append(f"{file.name}: deny-list, dosya işlenmedi")
+    elif plugin is None:
+        run.errors.append(f"{file.name}: desteklenmeyen dil")
+    else:
+        source = file.read_text(encoding="utf-8", errors="replace")
+        report = Report(file=file, content_sha256=hashlib.sha256(file.read_bytes()).hexdigest())
+        run.reports.append(report)
+        ids = count(1)
+        for unit in _shrink_units(plugin.extract_units(source), cfg.max_findings):
+            if not _suggest_shrink(run, report, unit, source, llm, ids):
+                break
+        _verify_suggestions(run, cfg)
     return run

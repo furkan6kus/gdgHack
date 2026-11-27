@@ -245,3 +245,24 @@ class ExplainResult(BaseModel):
     usage: TokenUsage = Field(default_factory=TokenUsage)
     errors: list[str] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
+
+
+class TranslatedSegment(BaseModel):
+    code: str
+    notes: list[str] = Field(default_factory=list)
+
+
+class TranslateResult(BaseModel):
+    file: Path
+    target: str
+    extension: str
+    segments: list[TranslatedSegment] = Field(default_factory=list)
+    output: str = ""
+    verification: VerificationResult | None = None
+    usage: TokenUsage = Field(default_factory=TokenUsage)
+    errors: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+
+    @property
+    def presentable(self) -> bool:
+        return not (self.verification and self.verification.status == VerifyStatus.FAILED)

@@ -111,3 +111,54 @@ def build_optimize_prompt(
         f"İlk satır numarası: {start_line}\n"
         f"Toplam profil süresi: {total_s:.4f}s\n\nProfil:\n{profile}\n\nKod:\n{code}\n"
     )
+
+
+SHRINK_SYSTEM = """\
+You shorten Python code without changing what it does. You receive one function or method with \
+line-number prefixes of the form "  12 | code". Answer with the requested JSON only.
+
+Rules:
+- Same behavior, return values, side effects and exceptions. Fewer lines.
+- Keep it readable: no clever one-liners, no comprehension nested deeper than one level.
+- Keep all names, the signature (the `def` line) and the docstring unchanged.
+- Every line at most 100 characters.
+- Write the explanation in Turkish: what was simplified.
+- Return at most one fix, category "shrink", with an empty finding_ids list.
+- `original` must be an exact, verbatim, contiguous substring of the given code, WITHOUT the \
+line-number prefixes, keeping indentation and newlines. `replacement` replaces it and must be \
+shorter than `original`.
+- If you see no safe way to shorten it, return an empty fixes list.
+"""
+
+TRANSLATE_SYSTEM = """\
+You translate one segment of a Python file into another programming language. Answer with the \
+requested JSON only.
+
+Rules:
+- Same behavior and idiomatic target-language code. Keep function and variable names unless the \
+target language forbids them.
+- Translate only the given segment. Do not repeat imports or definitions of earlier segments; \
+call earlier functions by the names and signatures listed in the prompt.
+- `code` is plain source text, no markdown fences, no commentary.
+- `notes` lists, in Turkish, any behavior that cannot be translated exactly or needs a library \
+or manual attention; leave it empty otherwise.
+"""
+
+
+def build_shrink_prompt(
+    file_name: str, language: str, unit_name: str, start_line: int, code: str
+) -> str:
+    return (
+        f"Dosya: {file_name}\nDil: {language}\nBirim: {unit_name}\n"
+        f"İlk satır numarası: {start_line}\n\nKod:\n{code}\n"
+    )
+
+
+def build_translate_prompt(
+    file_name: str, target: str, label: str, code: str, previous: list[str]
+) -> str:
+    done = "\n".join(f"- {signature}" for signature in previous) or "(yok)"
+    return (
+        f"Dosya: {file_name}\nHedef dil: {target}\nBölüm: {label}\n\n"
+        f"Daha önce çevrilen birimler (Python imzaları):\n{done}\n\nKod:\n{code}\n"
+    )

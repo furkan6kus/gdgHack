@@ -56,6 +56,21 @@ def _backup_path(backup_dir: Path, backup_root: Path, file: Path) -> Path:
     return backup_dir / rel
 
 
+def write_output(
+    path: Path, text: str, backup_root: Path, now: datetime | None = None
+) -> Path | None:
+    """Write `text` to `path` atomically; an existing file is backed up first (returned)."""
+    backup: Path | None = None
+    if path.exists():
+        stamp = backup_root / (now or datetime.now()).strftime(_STAMP)
+        backup = _backup_path(stamp, backup_root, path)
+        backup.parent.mkdir(parents=True, exist_ok=True)
+        backup.write_bytes(path.read_bytes())
+    path.parent.mkdir(parents=True, exist_ok=True)
+    _atomic_write(path, text.encode("utf-8"))
+    return backup
+
+
 def _fail(report: Report, ids: list[Suggestion], reason: str) -> list[ApplyOutcome]:
     return [
         ApplyOutcome(suggestion_id=s.id, file=report.file, applied=False, reason=reason)

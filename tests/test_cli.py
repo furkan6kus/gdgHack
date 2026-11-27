@@ -106,12 +106,6 @@ def test_analyzer_error_exit_3(monkeypatch: pytest.MonkeyPatch) -> None:
     assert "Traceback" not in result.output
 
 
-def test_json_output(tmp_path: Path) -> None:
-    result = runner.invoke(app, ["shrink", str(tmp_path), "--json"])
-    assert result.exit_code == 0
-    assert json.loads(result.output) == {"status": "not_implemented", "command": "shrink"}
-
-
 def test_truncation_exit_0() -> None:
     result = runner.invoke(app, ["analyze", str(FIXTURE), "--max-findings", "1"])
     assert result.exit_code == 0

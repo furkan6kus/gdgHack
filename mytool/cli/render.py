@@ -8,8 +8,10 @@ from pathlib import Path
 from rich.console import Console
 from rich.markup import escape
 from rich.panel import Panel
+from rich.syntax import Syntax
 from rich.table import Table
 
+from mytool.core.apply import selectable
 from mytool.core.models import (
     AnalysisRun,
     Benchmark,
@@ -20,6 +22,7 @@ from mytool.core.models import (
     Severity,
     Suggestion,
     TokenUsage,
+    TranslateResult,
     VerifyMethod,
     VerifyStatus,
 )
@@ -89,6 +92,8 @@ def _render_suggestion(console: Console, suggestion: Suggestion, diff_only: bool
         _render_diff(console, suggestion, "  ")
         return
     console.print(f"    [bold]Öneri:[/] {escape(suggestion.explanation)}")
+    if suggestion.category == Category.SHRINK and suggestion.patch is not None:
+        console.print(f"    [bold green]−{-suggestion.patch.line_delta} satır[/]")
     _render_diff(console, suggestion, "    ")
     if suggestion.benchmark is not None:
         console.print(f"    [bold green]{_benchmark_line(suggestion.benchmark)}[/]")
@@ -188,6 +193,17 @@ def _profile_table(run: AnalysisRun) -> Table:
     return table
 
 
+def _render_suggestion_lists(
+    console: Console, run: AnalysisRun, cwd: Path, diff_only: bool
+) -> None:
+    for report in run.reports:
+        name = escape(_display_path(report.file, cwd))
+        visible = report.visible_suggestions()
+        console.print(f"[bold]{name}[/] — {len(visible)} öneri")
+        for suggestion in visible:
+            _render_suggestion(console, suggestion, diff_only)
+
+
 def render_optimize(
     console: Console,
     run: AnalysisRun,
@@ -198,15 +214,76 @@ def render_optimize(
 ) -> None:
     if run.profile:
         console.print(_profile_table(run))
-    for report in run.reports:
-        name = escape(_display_path(report.file, cwd))
-        visible = report.visible_suggestions()
-        console.print(f"[bold]{name}[/] — {len(visible)} öneri")
-        for suggestion in visible:
-            _render_suggestion(console, suggestion, diff_only)
+    _render_suggestion_lists(console, run, cwd, diff_only)
     _render_messages(console, run, verbose)
     if verbose:
         _render_tokens(console, run.usage)
+
+
+def _line_count(path: Path) -> int:
+    try:
+        return len(path.read_text(encoding="utf-8", errors="replace").splitlines())
+    except OSError:
+        return 0
+
+
+def _shrink_total(run: AnalysisRun) -> str | None:
+    applicable = [s for r in run.reports for s in r.suggestions if selectable(s) and s.patch]
+    if not applicable:
+        return None
+    saved = -sum(s.patch.line_delta for s in applicable if s.patch)
+    before = sum(_line_count(r.file) for r in run.reports)
+    return f"Toplam: −{saved} satır ({before} → {before - saved})"
+
+
+def render_shrink(
+    console: Console,
+    run: AnalysisRun,
+    cwd: Path,
+    *,
+    diff_only: bool = False,
+    verbose: bool = False,
+) -> None:
+    _render_suggestion_lists(console, run, cwd, diff_only)
+    _render_messages(console, run, verbose)
+    total = _shrink_total(run)
+    console.print(total or "[green]Kısaltma önerisi yok[/]")
+    if verbose:
+        _render_tokens(console, run.usage)
+
+
+def _translate_status(result: TranslateResult) -> str:
+    check = result.verification
+    if check is None:
+        return "[yellow]⚠ doğrulanamadı[/]"
+    detail = escape(check.detail.splitlines()[0] if check.detail else "")
+    if check.status == VerifyStatus.PASSED:
+        return f"[green]✓ {detail}[/]"
+    if check.status == VerifyStatus.FAILED:
+        return f"[red]✗ çeviri doğrulamada başarısız: {detail}[/]"
+    return f"[yellow]⚠ doğrulanamadı ({detail})[/]"
+
+
+def render_translate(
+    console: Console, result: TranslateResult, lexer: str, *, verbose: bool = False
+) -> None:
+    """Failed verification never shows code: only the reason (details with verbose)."""
+    if result.presentable and result.output:
+        console.print(Syntax(result.output, lexer, word_wrap=True))
+        for segment in result.segments:
+            for note in segment.notes:
+                console.print(f"[dim]  • {escape(note)}[/]")
+    if result.verification is not None:
+        console.print(_translate_status(result))
+        if verbose and not result.presentable:
+            for line in result.verification.detail.splitlines()[1:]:
+                console.print(f"[dim]    {escape(line)}[/]")
+    for error in result.errors:
+        console.print(f"[red]{escape(error)}[/]")
+    for warning in result.warnings:
+        console.print(f"[yellow]{escape(warning)}[/]")
+    if verbose:
+        _render_tokens(console, result.usage)
 
 
 def render_explain(console: Console, result: ExplainResult, *, verbose: bool = False) -> None:

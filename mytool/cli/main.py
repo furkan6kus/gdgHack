@@ -19,12 +19,21 @@ from rich.prompt import Confirm
 from mytool import __version__
 from mytool.cli import interact
 from mytool.cli.interact import _is_interactive
-from mytool.cli.render import render_explain, render_optimize, render_reports
-from mytool.core.apply import apply_suggestions, latest_backup, restore_backup
+from mytool.cli.render import (
+    render_explain,
+    render_optimize,
+    render_reports,
+    render_shrink,
+    render_translate,
+)
+from mytool.core.apply import apply_suggestions, latest_backup, restore_backup, write_output
 from mytool.core.config import Config, has_api_key, load_config
 from mytool.core.llm import AnthropicLLM, LLMClient
-from mytool.core.models import AnalysisRun, ApplyResult
+from mytool.core.models import AnalysisRun, ApplyResult, TranslateResult
 from mytool.core.pipeline import analyze, explain, optimize
+from mytool.core.pipeline import shrink as shrink_file
+from mytool.core.translate import resolve_target
+from mytool.core.translate import translate as translate_file
 from mytool.core.verify import find_project_root
 
 app = typer.Typer(
@@ -78,27 +87,6 @@ def _root(
     _force_utf8()
 
 
-def _prepare(
-    command: str,
-    path: Path,
-    phase: int,
-    *,
-    json_out: bool,
-    no_verify: bool,
-    model: str | None,
-    max_findings: int | None,
-) -> Config:
-    if not path.exists():
-        err_console.print(f"[red]Error:[/] path not found: {path}")
-        raise typer.Exit(2)
-    config = load_config(model=model, max_findings=max_findings, verify=not no_verify)
-    if json_out:
-        typer.echo(json.dumps({"status": "not_implemented", "command": command}))
-    else:
-        console.print(f"[yellow]{command}: Faz {phase}'de gelecek[/]")
-    return config
-
-
 def _make_llm(config: Config) -> LLMClient:
     return AnthropicLLM(config)
 
@@ -122,6 +110,13 @@ NOTICE_TEXT = (
 OPTIMIZE_NOTICE_TEXT = (
     "Profil ve ölçüm için benchmark betiği, projenin testleri veya dosyanın kendisi bu "
     "makinede (sandbox yok) geçici bir kopyada çalıştırılır; --no-verify bunu engellemez."
+)
+
+
+TRANSLATE_NOTICE_TEXT = (
+    "Doğrulama için derleyici/denetleyici ve (JavaScript çıktı karşılaştırmasında) orijinal "
+    "betik bu makinede (sandbox yok) geçici bir kopyada çalıştırılır. İstemiyorsan "
+    "--no-verify kullan."
 )
 
 
@@ -323,42 +318,93 @@ def shrink(
     no_verify: NoVerifyOpt = False,
     model: ModelOpt = None,
     max_findings: MaxFindingsOpt = None,
+    max_tokens: MaxTokensOpt = None,
+    timeout: TimeoutOpt = None,
     verbose: VerboseOpt = False,
 ) -> None:
-    """Suggest shorter equivalent code."""
-    _prepare(
-        "shrink",
-        path,
-        6,
-        json_out=json_out,
-        no_verify=no_verify,
+    """Suggest shorter equivalent code for the longest functions."""
+    _require_file(path)
+    _require_api_key("shrink")
+    config = load_config(
         model=model,
         max_findings=max_findings,
+        max_tokens_per_request=max_tokens,
+        verify=not no_verify,
+        subprocess_timeout_s=timeout,
     )
+    out = err_console if json_out else console
+    out.print("[dim]Not: ilgili kod parçaları Anthropic API'ye gönderilir.[/]")
+    if config.verify:
+        _show_verify_notice(err_console)
+    run = shrink_file(path, config, _make_llm(config))
+    _present(
+        run,
+        path,
+        json_out=json_out,
+        fix=fix,
+        no_verify=no_verify,
+        render=lambda: render_shrink(console, run, Path.cwd(), diff_only=diff, verbose=verbose),
+    )
+
+
+def _write_translation(result: TranslateResult, out_file: Path) -> None:
+    """Write only a presentable, complete translation; never next to the source by default."""
+    if not result.presentable or result.errors or not result.output:
+        return
+    backup = write_output(out_file, result.output, _backup_root(out_file))
+    err_console.print(f"yazıldı: {escape(str(out_file))}")
+    if backup is not None:
+        err_console.print(f"eski dosya yedeklendi: {escape(str(backup))}")
 
 
 @app.command()
 def translate(
     path: PathArg,
-    to: Annotated[str, typer.Option("--to", help="Target language.")],
-    diff: DiffOpt = False,
-    fix: FixOpt = False,
+    to: Annotated[str, typer.Option("--to", help="Target language (e.g. javascript, go, rust).")],
+    out_file: Annotated[
+        Path | None, typer.Option("--out", help="Write the translation to this new file.")
+    ] = None,
+    force: Annotated[
+        bool, typer.Option("--force", help="Overwrite --out (old file backed up).")
+    ] = False,
     json_out: JsonOpt = False,
     no_verify: NoVerifyOpt = False,
     model: ModelOpt = None,
-    max_findings: MaxFindingsOpt = None,
+    max_tokens: MaxTokensOpt = None,
+    timeout: TimeoutOpt = None,
     verbose: VerboseOpt = False,
 ) -> None:
-    """Translate code to another language."""
-    _prepare(
-        "translate",
-        path,
-        6,
-        json_out=json_out,
-        no_verify=no_verify,
+    """Translate a file to another language, function by function."""
+    _require_file(path)
+    if not to.strip():
+        err_console.print("[red]Error:[/] --to boş olamaz")
+        raise typer.Exit(2)
+    if out_file is not None and out_file.exists() and not force:
+        err_console.print(f"[red]Error:[/] {out_file} zaten var; üzerine yazmak için --force")
+        raise typer.Exit(2)
+    if out_file is not None and out_file.resolve() == path.resolve():
+        err_console.print("[red]Error:[/] --out kaynak dosya olamaz")
+        raise typer.Exit(2)
+    _require_api_key("translate")
+    config = load_config(
         model=model,
-        max_findings=max_findings,
+        max_tokens_per_request=max_tokens,
+        verify=not no_verify,
+        subprocess_timeout_s=timeout,
     )
+    out = err_console if json_out else console
+    out.print("[dim]Not: dosyanın kodu Anthropic API'ye gönderilir.[/]")
+    if config.verify:
+        _show_verify_notice(err_console, TRANSLATE_NOTICE_TEXT)
+    result = translate_file(path, to, config, _make_llm(config))
+    if json_out:
+        typer.echo(json.dumps(result.model_dump(mode="json"), indent=2, ensure_ascii=False))
+    else:
+        render_translate(console, result, resolve_target(to).lexer, verbose=verbose)
+    if out_file is not None:
+        _write_translation(result, out_file)
+    if result.errors or not result.presentable:
+        raise typer.Exit(3)
 
 
 @app.command(name="explain")
