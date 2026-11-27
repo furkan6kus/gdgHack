@@ -77,3 +77,14 @@ def test_places_include_home(client: TestClient) -> None:
     places = response.json()
     assert places[0] == {"name": "Ev", "path": str(Path.home()), "kind": "home"}
     assert all(p["kind"] in {"home", "folder", "drive"} for p in places)
+
+
+def test_places_follow_moved_xdg_download_dir(
+    client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    moved = tmp_path / "elsewhere" / "İndirilenler"
+    moved.mkdir(parents=True)
+    (tmp_path / "user-dirs.dirs").write_text(f'XDG_DOWNLOAD_DIR="{moved}"\n', encoding="utf-8")
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    by_name = {p["name"]: p["path"] for p in client.get("/api/places").json()}
+    assert by_name["İndirilenler"] == str(moved)

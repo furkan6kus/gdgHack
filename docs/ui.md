@@ -103,7 +103,7 @@ MockAdapter              CoreAdapter
 | `GET /api/analyze/{job_id}/events` | SSE stream: `progress`..., then `result` or `error` |
 | `POST /api/analyze/{job_id}/cancel` | Cancel a running job (204) |
 | `GET /api/browse?path=&show_hidden=` | List a directory (default: home; a file path lists its folder) |
-| `GET /api/places` | Picker quick access: home, Desktop/Documents/Downloads (incl. OneDrive and Turkish names), drives |
+| `GET /api/places` | Picker quick access: home, the OS's real Desktop/Documents/Downloads (Windows Known Folders, Linux XDG user-dirs; name guesses as fallback), drives |
 | `POST /api/apply` `{job_id, suggestion_ids}` | Apply passed suggestions; returns `{applied_ids, changed_files, backup_path}` |
 
 Errors always have the body `{"code": "...", "message": "..."}`. Common codes:
@@ -161,7 +161,7 @@ Shortcuts are ignored while typing in an input or when focus is inside the diff 
 - Results are two columns: suggestions grouped by file (left) and detail + side-by-side diff (right).
   Findings without a suggestion live in a collapsed "Önerisiz bulgular" section.
 - The picker ("Gözat…") has a quick-access sidebar and can select a folder **or a single file**
-  (click a file, then "Bu dosyayı seç", or double-click it). Browsing a file path lists its folder.
+  (click a file, then "Bu dosyayı seç", or double-click it), with a search box to filter the current folder. Browsing a file path lists its folder.
 
 - Category chips: `HATA` = bug, `PERF` = perf, `STİL` = style (shrink/translate are not shown for analyze).
   There is no severity filter; severity is the coloured bar on each row (*Ciddi / Uyarı / Bilgi* on hover).

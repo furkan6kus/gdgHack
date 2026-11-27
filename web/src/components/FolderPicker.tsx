@@ -30,6 +30,7 @@ export function FolderPicker({ open, initialPath, onClose, onPick }: FolderPicke
   const [loaded, setLoaded] = useState<Listing | null>(null);
   const [places, setPlaces] = useState<Place[]>([]);
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
+  const [query, setQuery] = useState('');
   const key = keyOf(target);
   const listing = loaded?.key === key ? loaded : null; // null = loading
 
@@ -59,6 +60,7 @@ export function FolderPicker({ open, initialPath, onClose, onPick }: FolderPicke
 
   const navigate = (path: string | undefined) => {
     setSelectedFile(null);
+    setQuery('');
     setTarget((t) => ({ ...t, path }));
   };
   const current = listing?.kind === 'ok' ? listing.data.path : target.path;
@@ -100,6 +102,17 @@ export function FolderPicker({ open, initialPath, onClose, onPick }: FolderPicke
               label="Gizliler"
             />
           </div>
+          <div className="shrink-0 border-b border-border px-3 py-2">
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Bu klasörde ara…"
+              aria-label="Bu klasörde ara"
+              autoFocus
+              spellCheck={false}
+              className="h-8 w-full rounded-md border border-border bg-bg px-2.5 text-sm outline-none placeholder:text-muted/50 focus:border-accent"
+            />
+          </div>
           <div className="min-h-0 flex-1 overflow-auto p-1.5">
             {listing === null && (
               <div className="flex h-full items-center justify-center text-muted">
@@ -116,7 +129,8 @@ export function FolderPicker({ open, initialPath, onClose, onPick }: FolderPicke
             )}
             {listing?.kind === 'ok' && (
               <EntryList
-                entries={listing.data.entries}
+                entries={filterEntries(listing.data.entries, query)}
+                filtered={query.trim() !== ''}
                 selectedFile={selectedFile}
                 onOpenDir={navigate}
                 onSelectFile={setSelectedFile}
@@ -165,21 +179,33 @@ function PlacesList({
   );
 }
 
+function filterEntries(entries: BrowseEntry[], query: string): BrowseEntry[] {
+  const needle = query.trim().toLocaleLowerCase('tr-TR');
+  if (!needle) return entries;
+  return entries.filter((e) => e.name.toLocaleLowerCase('tr-TR').includes(needle));
+}
+
 function EntryList({
   entries,
+  filtered,
   selectedFile,
   onOpenDir,
   onSelectFile,
   onPickFile,
 }: {
   entries: BrowseEntry[];
+  filtered: boolean;
   selectedFile: string | null;
   onOpenDir: (path: string) => void;
   onSelectFile: (path: string) => void;
   onPickFile: (path: string) => void;
 }) {
   if (entries.length === 0) {
-    return <p className="p-6 text-center text-sm text-muted">Bu klasör boş.</p>;
+    return (
+      <p className="p-6 text-center text-sm text-muted">
+        {filtered ? 'Eşleşen dosya ya da klasör yok.' : 'Bu klasör boş.'}
+      </p>
+    );
   }
   return (
     <ul>

@@ -16,7 +16,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
-from server import browse
+from server import browse, places
 from server.adapters import adapter_from_env
 from server.adapters.base import Adapter
 from server.contracts import Suggestion
@@ -132,8 +132,8 @@ def _install_routes(app: FastAPI, store: JobStore) -> None:
         return browse.list_dir(browse.resolve_dir(path), show_hidden=show_hidden)
 
     @app.get("/api/places")
-    async def places() -> list[Place]:
-        return browse.places()
+    async def quick_access() -> list[Place]:
+        return places.places()
 
     @app.post("/api/apply")
     async def apply(body: ApplyRequest) -> ApplyResponse:
