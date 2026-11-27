@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import difflib
+import re
 from enum import StrEnum
 from pathlib import Path
 from typing import Self
@@ -92,6 +93,17 @@ def _lines_with_eol(text: str) -> list[str]:
     return lines
 
 
+_HUNK = re.compile(r"^@@ -(\d+)((?:,\d+)?) \+(\d+)((?:,\d+)?) @@", re.MULTILINE)
+
+
+def _shift_hunks(diff: str, offset: int) -> str:
+    def shift(match: re.Match[str]) -> str:
+        old, old_n, new, new_n = match.groups()
+        return f"@@ -{int(old) + offset}{old_n} +{int(new) + offset}{new_n} @@"
+
+    return _HUNK.sub(shift, diff) if offset else diff
+
+
 class Patch(BaseModel):
     model_config = ConfigDict(frozen=True)
 
@@ -109,7 +121,8 @@ class Patch(BaseModel):
             tofile=f"b/{name}",
             n=context,
         )
-        return "".join(diff)
+        text = "".join(diff)
+        return _shift_hunks(text, self.lines.start - 1) if self.lines else text
 
     @property
     def line_delta(self) -> int:
@@ -162,6 +175,7 @@ class Report(BaseModel):
 class AnalysisRun(BaseModel):
     reports: list[Report] = Field(default_factory=list)
     errors: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
     skipped: list[str] = Field(default_factory=list)
     truncated: int = 0
 

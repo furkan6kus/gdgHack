@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import ast
+
 import tree_sitter_python
 from tree_sitter import Language, Node, Parser
 
@@ -23,6 +25,15 @@ class PythonPlugin:
         units: list[CodeUnit] = []
         _walk(tree.root_node, data, "", False, units)
         return units
+
+    def check_syntax(self, source: str, filename: str) -> str | None:
+        try:
+            ast.parse(source, filename=filename)
+        except SyntaxError as exc:
+            return f"satır {exc.lineno or '?'}: {exc.msg}"
+        except ValueError as exc:
+            return str(exc)
+        return None
 
 
 def _walk(node: Node, data: bytes, prefix: str, in_class: bool, out: list[CodeUnit]) -> None:

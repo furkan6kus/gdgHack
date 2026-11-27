@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from collections.abc import Iterator, Sequence
+from contextlib import ExitStack
 from dataclasses import dataclass
 from itertools import count
 from pathlib import Path
@@ -20,9 +21,20 @@ from mytool.core.llm import (
     LLMRequest,
     number_lines,
 )
-from mytool.core.models import AnalysisRun, CodeUnit, Finding, Report, Severity, Suggestion
+from mytool.core.models import (
+    AnalysisRun,
+    CodeUnit,
+    Finding,
+    Report,
+    Severity,
+    Suggestion,
+    VerificationResult,
+    VerifyMethod,
+    VerifyStatus,
+)
 from mytool.core.parser import unit_for_line
 from mytool.core.patching import PatchError, build_patch
+from mytool.core.verify import Workspace, find_project_root, verify_patch
 
 SKIP_DIRS = frozenset(
     {".git", ".venv", "venv", "node_modules", "__pycache__", ".mytool", "build", "dist"}
@@ -198,12 +210,12 @@ def _handle_group(
     known = {f.id for f in group.findings}
     for fix in response.fixes:
         if not fix.finding_ids or not known.issuperset(fix.finding_ids):
-            run.errors.append(f"{report.file.name}: bilinmeyen bulgu kimliği, öneri atlandı")
+            run.warnings.append(f"{report.file.name}: bilinmeyen bulgu kimliği, öneri atlandı")
             continue
         suggestion, error = _suggestion(ids, report.file, group, source, fix)
         report.suggestions.append(suggestion)
         if error:
-            run.errors.append(error)
+            run.warnings.append(error)
 
 
 def _suggest_for_report(
@@ -216,10 +228,53 @@ def _suggest_for_report(
         try:
             _handle_group(run, report, group, source, llm, ids)
         except LLMError as exc:
-            run.errors.append(f"{report.file.name}: {exc}")
+            (run.errors if exc.fatal else run.warnings).append(f"{report.file.name}: {exc}")
             if exc.fatal:
                 return False
     return True
+
+
+def _verify_one(
+    run: AnalysisRun,
+    stack: ExitStack,
+    workspaces: dict[Path, Workspace],
+    cfg: Config,
+    suggestion: Suggestion,
+) -> VerificationResult:
+    patch = suggestion.patch
+    plugin = plugin_for(patch.file) if patch else None
+    if patch is None or plugin is None:
+        return VerificationResult(
+            status=VerifyStatus.SKIPPED, method=VerifyMethod.NONE, detail="dil desteklenmiyor"
+        )
+    try:
+        root = find_project_root(patch.file)
+        if root not in workspaces:
+            workspaces[root] = stack.enter_context(Workspace(root))
+        return verify_patch(workspaces[root], patch, plugin, cfg)
+    except OSError as exc:
+        run.warnings.append(f"{patch.file.name}: doğrulama altyapısı hatası: {exc}")
+        return VerificationResult(
+            status=VerifyStatus.SKIPPED,
+            method=VerifyMethod.NONE,
+            detail=f"doğrulama yapılamadı: {exc}",
+        )
+
+
+def _verify_suggestions(run: AnalysisRun, cfg: Config) -> None:
+    skipped = VerificationResult(
+        status=VerifyStatus.SKIPPED, method=VerifyMethod.NONE, detail="--no-verify"
+    )
+    workspaces: dict[Path, Workspace] = {}
+    with ExitStack() as stack:
+        for report in run.reports:
+            for index, suggestion in enumerate(report.suggestions):
+                if suggestion.patch is None:
+                    continue
+                result = (
+                    _verify_one(run, stack, workspaces, cfg, suggestion) if cfg.verify else skipped
+                )
+                report.suggestions[index] = suggestion.model_copy(update={"verification": result})
 
 
 def analyze(
@@ -235,4 +290,5 @@ def analyze(
     for report in run.reports:
         if report.findings and not _suggest_for_report(run, report, llm, ids):
             break
+    _verify_suggestions(run, cfg)
     return run

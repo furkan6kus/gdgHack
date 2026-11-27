@@ -8,7 +8,16 @@ from pathlib import Path
 from rich.console import Console
 from rich.markup import escape
 
-from mytool.core.models import AnalysisRun, Category, Finding, Report, Severity, Suggestion
+from mytool.core.models import (
+    AnalysisRun,
+    Category,
+    Finding,
+    Report,
+    Severity,
+    Suggestion,
+    VerifyMethod,
+    VerifyStatus,
+)
 
 _LABELS: dict[Category, tuple[str, str]] = {
     Category.BUG: ("HATA", "red"),
@@ -53,9 +62,15 @@ def _render_diff(console: Console, suggestion: Suggestion, indent: str) -> None:
 
 
 def _status(suggestion: Suggestion) -> str:
-    if suggestion.verification is None:
-        return "[yellow]⚠ doğrulanmadı[/]"
-    return f"[dim]doğrulama: {suggestion.verification.status.value}[/]"
+    result = suggestion.verification
+    if result is None or suggestion.patch is None:
+        return "[yellow]⚠ yalnız açıklama[/]"
+    detail = escape(result.detail)
+    if result.status == VerifyStatus.PASSED and result.method == VerifyMethod.PYTEST:
+        return "[green]✓ testler geçti[/]"
+    if result.status == VerifyStatus.PASSED:
+        return f"[yellow]⚠ doğrulanamadı (yalnız sözdizimi: {detail})[/]"
+    return f"[yellow]⚠ doğrulanmadı ({detail})[/]"
 
 
 def _render_suggestion(console: Console, suggestion: Suggestion, diff_only: bool) -> None:
@@ -64,8 +79,7 @@ def _render_suggestion(console: Console, suggestion: Suggestion, diff_only: bool
         return
     console.print(f"    [bold]Öneri:[/] {escape(suggestion.explanation)}")
     _render_diff(console, suggestion, "    ")
-    if suggestion.patch is not None:
-        console.print(f"    {_status(suggestion)}")
+    console.print(f"    {_status(suggestion)}")
 
 
 def _render_report(console: Console, report: Report, cwd: Path, diff_only: bool) -> None:
@@ -83,6 +97,20 @@ def _render_report(console: Console, report: Report, cwd: Path, diff_only: bool)
     for suggestion in suggestions:
         if suggestion.id not in shown:
             _render_suggestion(console, suggestion, diff_only)
+
+
+def _render_hidden(console: Console, run: AnalysisRun, verbose: bool) -> None:
+    failed = [s for r in run.reports for s in r.suggestions if not s.presentable]
+    if not failed:
+        return
+    console.print(f"[dim]{len(failed)} öneri doğrulamada başarısız olduğu için gizlendi[/]")
+    if not verbose:
+        return
+    for suggestion in failed:
+        detail = suggestion.verification.detail if suggestion.verification else ""
+        console.print(f"[dim]  {escape(suggestion.id)}:[/]")
+        for line in detail.splitlines()[:5]:
+            console.print(f"[dim]    {escape(line)}[/]")
 
 
 def _totals(reports: Sequence[Report]) -> str:
@@ -107,6 +135,9 @@ def render_reports(
         _render_report(console, report, cwd, diff_only)
     for error in run.errors:
         console.print(f"[red]{escape(error)}[/]")
+    for warning in run.warnings:
+        console.print(f"[yellow]{escape(warning)}[/]")
+    _render_hidden(console, run, verbose)
     for skip in run.skipped:
         console.print(f"[dim]atlandı: {escape(skip)}[/]")
     if run.truncated:

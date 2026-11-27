@@ -3,8 +3,8 @@ from pathlib import Path
 import pytest
 
 from mytool.core.llm import LLMFix
-from mytool.core.models import Category
-from mytool.core.patching import PatchError, build_patch
+from mytool.core.models import Category, LineRange, Patch
+from mytool.core.patching import PatchError, apply_patch, build_patch
 
 SOURCE = "def f(x):\n    y = x\n    return y\n"
 FILE = Path("a.py")
@@ -62,3 +62,33 @@ def test_not_found() -> None:
 def test_multiple_matches() -> None:
     with pytest.raises(PatchError, match="2 yerde"):
         build_patch("a = 1\na = 1\n", FILE, 1, _fix("a = 1", "a = 2"))
+
+
+def _patch(original: str, new: str, line: int | None = None) -> Patch:
+    lines = LineRange(start=line, end=line) if line else None
+    return Patch(file=FILE, original=original, new=new, lines=lines)
+
+
+def test_apply_once() -> None:
+    assert apply_patch(SOURCE, _patch("    y = x\n", "")) == "def f(x):\n    return y\n"
+
+
+def test_apply_missing() -> None:
+    with pytest.raises(PatchError, match="bulunamadı"):
+        apply_patch(SOURCE, _patch("nope", "x"))
+
+
+def test_apply_multiple_without_lines_is_error() -> None:
+    with pytest.raises(PatchError, match="2 yerde"):
+        apply_patch("a = 1\na = 1\n", _patch("a = 1", "a = 2"))
+
+
+def test_apply_multiple_prefers_line() -> None:
+    text = "a = 1\nb = 0\na = 1\n"
+    assert apply_patch(text, _patch("a = 1", "a = 2", line=3)) == "a = 1\nb = 0\na = 2\n"
+    with pytest.raises(PatchError):
+        apply_patch(text, _patch("a = 1", "a = 2", line=2))
+
+
+def test_patch_error_is_value_error() -> None:
+    assert issubclass(PatchError, ValueError)

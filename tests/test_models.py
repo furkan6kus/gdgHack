@@ -93,3 +93,28 @@ def test_report_json_round_trip() -> None:
         usage=TokenUsage(input_tokens=3, output_tokens=4),
     )
     assert Report.model_validate_json(report.model_dump_json()) == report
+
+
+def test_unified_diff_hunk_offset() -> None:
+    patch = Patch(
+        file=Path("a.py"),
+        original="    y = x\n",
+        new="    y = x + 1\n",
+        lines=LineRange(start=11, end=11),
+    )
+    assert "@@ -11 +11 @@" in patch.unified_diff()
+
+
+def test_unified_diff_hunk_offset_keeps_counts() -> None:
+    patch = Patch(
+        file=Path("a.py"),
+        original="a\nb\n",
+        new="a\n",
+        lines=LineRange(start=50, end=51),
+    )
+    assert "@@ -50,2 +50 @@" in patch.unified_diff()
+
+
+def test_unified_diff_without_lines_is_relative() -> None:
+    patch = Patch(file=Path("a.py"), original="a\n", new="b\n")
+    assert "@@ -1 +1 @@" in patch.unified_diff()

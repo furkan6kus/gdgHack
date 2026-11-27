@@ -21,6 +21,13 @@ runner = CliRunner()
 COMMANDS = ["analyze", "optimize", "shrink", "translate", "explain"]
 
 
+@pytest.fixture(autouse=True)
+def _fake_home(tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch) -> Path:
+    home = tmp_path_factory.mktemp("home")
+    monkeypatch.setattr(Path, "home", lambda: home)
+    return home
+
+
 def test_help_lists_commands() -> None:
     result = runner.invoke(app, ["--help"])
     assert result.exit_code == 0
@@ -140,18 +147,18 @@ def test_no_api_key_falls_back_to_static(monkeypatch: pytest.MonkeyPatch) -> Non
 
 @pytest.mark.usefixtures("llm_env")
 def test_llm_suggestions_rendered() -> None:
-    result = runner.invoke(app, ["analyze", str(FIXTURE)])
+    result = runner.invoke(app, ["analyze", str(FIXTURE), "--no-verify"])
     assert result.exit_code == 0
     assert "Anthropic API'ye gönderilir" in result.output
     assert "kullanilmayan import kaldirilmali" in result.output
-    assert "⚠ doğrulanmadı" in result.output
+    assert "⚠ doğrulanmadı (--no-verify)" in result.output
     assert any(line.strip() == "-import os" for line in result.output.splitlines())
     assert "Token:" not in result.output
 
 
 @pytest.mark.usefixtures("llm_env")
 def test_diff_hides_explanations() -> None:
-    result = runner.invoke(app, ["analyze", str(FIXTURE), "--diff"])
+    result = runner.invoke(app, ["analyze", str(FIXTURE), "--diff", "--no-verify"])
     assert result.exit_code == 0
     assert "-import os" in result.output
     assert "kullanilmayan" not in result.output
@@ -160,7 +167,7 @@ def test_diff_hides_explanations() -> None:
 
 @pytest.mark.usefixtures("llm_env")
 def test_verbose_shows_tokens() -> None:
-    result = runner.invoke(app, ["analyze", str(FIXTURE), "--verbose"])
+    result = runner.invoke(app, ["analyze", str(FIXTURE), "--verbose", "--no-verify"])
     assert "Token: giriş" in result.output
     assert "çıkış" in result.output
 
@@ -176,6 +183,81 @@ def test_static_flag_never_calls_llm() -> None:
 
 @pytest.mark.usefixtures("llm_env")
 def test_json_includes_suggestions() -> None:
-    result = runner.invoke(app, ["analyze", str(FIXTURE), "--json"])
+    result = runner.invoke(app, ["analyze", str(FIXTURE), "--json", "--no-verify"])
     data = json.loads(result.stdout)
-    assert data["reports"][0]["suggestions"][0]["verification"] is None
+    assert data["reports"][0]["suggestions"][0]["verification"]["status"] == "skipped"
+
+
+class ScriptedLLM:
+    """Fix for the first finding of every request: replace original with replacement."""
+
+    def __init__(self, original: str, replacement: str) -> None:
+        self.original, self.replacement = original, replacement
+
+    def suggest(self, req: LLMRequest) -> tuple[LLMUnitResponse, TokenUsage]:
+        fix = LLMFix(
+            finding_ids=[req.findings[0].id],
+            category=Category.STYLE,
+            explanation="açıklama",
+            original=self.original,
+            replacement=self.replacement,
+        )
+        return LLMUnitResponse(fixes=[fix]), TokenUsage()
+
+
+def _scripted(monkeypatch: pytest.MonkeyPatch, original: str, replacement: str) -> None:
+    monkeypatch.setattr(cli_main, "has_api_key", lambda: True)
+    monkeypatch.setattr(cli_main, "_make_llm", lambda cfg: ScriptedLLM(original, replacement))
+
+
+def _tmp_project(root: Path) -> Path:
+    (root / "pyproject.toml").write_text('[project]\nname = "p"\nversion = "0"\n')
+    calc = root / "calc.py"
+    calc.write_text("import os\n\n\ndef add(a, b):\n    return a + b\n")
+    return calc
+
+
+def test_verify_notice_printed_once(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    calc = _tmp_project(tmp_path)
+    _scripted(monkeypatch, "import os\n", "")
+    first = runner.invoke(app, ["analyze", str(calc)])
+    second = runner.invoke(app, ["analyze", str(calc)])
+    assert "sandbox yok" in first.output
+    assert "sandbox yok" not in second.output
+    assert (Path.home() / ".mytool" / "verify-notice").exists()
+    assert "yalnız sözdizimi: test yok" in first.output
+
+
+def test_no_notice_with_no_verify(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    calc = _tmp_project(tmp_path)
+    _scripted(monkeypatch, "import os\n", "")
+    result = runner.invoke(app, ["analyze", str(calc), "--no-verify"])
+    assert "sandbox yok" not in result.output
+    assert not (Path.home() / ".mytool" / "verify-notice").exists()
+
+
+def test_failed_suggestions_hidden_with_count(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    calc = _tmp_project(tmp_path)
+    _scripted(monkeypatch, "import os\n", "import os(\n")
+    result = runner.invoke(app, ["analyze", str(calc)])
+    assert result.exit_code == 0
+    assert "1 öneri doğrulamada başarısız olduğu için gizlendi" in result.output
+    assert "Öneri:" not in result.output
+    verbose = runner.invoke(app, ["analyze", str(calc), "--verbose"])
+    assert "satır 1" in verbose.output.split("gizlendi", 1)[1]
+
+
+def test_warnings_do_not_cause_exit_3(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    calc = _tmp_project(tmp_path)
+    _scripted(monkeypatch, "yok böyle bir satır\n", "")
+    result = runner.invoke(app, ["analyze", str(calc)])
+    assert result.exit_code == 0
+    assert "patch eşleşmedi" in result.output
+    assert "yalnız açıklama" in result.output
+
+
+def test_timeout_option_accepted() -> None:
+    result = runner.invoke(app, ["analyze", str(FIXTURE), "--timeout", "30"])
+    assert result.exit_code == 0

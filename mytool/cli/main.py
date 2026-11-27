@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import io
 import json
 import sys
@@ -10,6 +11,7 @@ from typing import Annotated
 
 import typer
 from rich.console import Console
+from rich.panel import Panel
 
 from mytool import __version__
 from mytool.cli.render import render_reports
@@ -39,6 +41,9 @@ MaxTokensOpt = Annotated[
     int | None, typer.Option("--max-tokens", min=1, help="Max output tokens per LLM request.")
 ]
 StaticOpt = Annotated[bool, typer.Option("--static", help="Skip the LLM, static findings only.")]
+TimeoutOpt = Annotated[
+    int | None, typer.Option("--timeout", min=1, help="Subprocess timeout in seconds.")
+]
 VerboseOpt = Annotated[bool, typer.Option("--verbose", help="Verbose output.")]
 
 
@@ -100,6 +105,22 @@ def _choose_llm(config: Config, static: bool, out: Console) -> LLMClient | None:
     return _make_llm(config)
 
 
+NOTICE_TEXT = (
+    "Doğrulama sırasında projenin testleri bu makinede (sandbox yok) geçici bir kopyada "
+    "çalıştırılır. İstemiyorsan --no-verify kullan."
+)
+
+
+def _show_verify_notice(out: Console) -> None:
+    marker = Path.home() / ".mytool" / "verify-notice"
+    if marker.exists():
+        return
+    out.print(Panel(NOTICE_TEXT, title="Uyarı", border_style="yellow"))
+    with contextlib.suppress(OSError):
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        marker.touch()
+
+
 @app.command(name="analyze")
 def analyze_command(
     path: PathArg,
@@ -111,6 +132,7 @@ def analyze_command(
     max_findings: MaxFindingsOpt = None,
     max_tokens: MaxTokensOpt = None,
     static: StaticOpt = False,
+    timeout: TimeoutOpt = None,
     verbose: VerboseOpt = False,
 ) -> None:
     """Run static analysis and suggest verified patches."""
@@ -122,8 +144,11 @@ def analyze_command(
         max_findings=max_findings,
         max_tokens_per_request=max_tokens,
         verify=not no_verify,
+        subprocess_timeout_s=timeout,
     )
     llm = _choose_llm(config, static, err_console if json_out else console)
+    if llm is not None and config.verify:
+        _show_verify_notice(err_console)
     run = analyze(path, config, llm)
     if json_out:
         typer.echo(run.model_dump_json(indent=2))

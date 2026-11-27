@@ -39,3 +39,11 @@ def test_source_text() -> None:
 def test_registry() -> None:
     assert plugin_for(Path("a.py")) is not None
     assert plugin_for(Path("a.txt")) is None
+
+
+def test_check_syntax_ok_and_error() -> None:
+    plugin = PythonPlugin()
+    assert plugin.check_syntax("x = 1\n", "a.py") is None
+    message = plugin.check_syntax("x = 1\ndef f(:\n", "a.py")
+    assert message is not None
+    assert message.startswith("satır 2")

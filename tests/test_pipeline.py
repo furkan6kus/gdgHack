@@ -1,11 +1,14 @@
 from collections.abc import Callable
 from pathlib import Path
 
+import pytest
+
 from mytool.core.analyzers.base import AnalyzerError
 from mytool.core.config import Config
 from mytool.core.llm import LLMError, LLMFix, LLMRequest, LLMUnitResponse
-from mytool.core.models import Category, Finding, LineRange, Severity, TokenUsage
+from mytool.core.models import Category, Finding, LineRange, Severity, TokenUsage, VerifyStatus
 from mytool.core.pipeline import analyze, analyze_static, collect_files
+from mytool.core.verify import Workspace
 
 FIXTURE = Path(__file__).parent / "fixtures" / "sample.py"
 
@@ -133,11 +136,13 @@ def test_suggestions_attached_with_absolute_patch_lines(tmp_path: Path) -> None:
     a.write_text("x = 1\n\n\ndef f():\n    y = 1\n    return 2\n")
     analyzer = FakeAnalyzer([_finding(a, 5)])
     llm = FakeLLM(lambda r: LLMUnitResponse(fixes=[_fix([r.findings[0].id], "    y = 1\n", "")]))
-    run = analyze(a, Config(), llm, [analyzer])
+    run = analyze(a, Config(verify=False), llm, [analyzer])
     (report,) = run.reports
     (sug,) = report.suggestions
     assert sug.id == "sug-1"
-    assert sug.verification is None
+    assert sug.verification is not None
+    assert sug.verification.status == VerifyStatus.SKIPPED
+    assert sug.verification.detail == "--no-verify"
     assert sug.patch is not None
     assert sug.patch.lines is not None
     assert sug.patch.lines.start == 5
@@ -164,7 +169,8 @@ def test_unknown_finding_id_dropped(tmp_path: Path) -> None:
     llm = FakeLLM(lambda r: LLMUnitResponse(fixes=[_fix(["nope"])]))
     run = analyze(a, Config(), llm, [FakeAnalyzer([_finding(a, 1)])])
     assert run.reports[0].suggestions == []
-    assert len(run.errors) == 1
+    assert len(run.warnings) == 1
+    assert run.errors == []
 
 
 def test_patch_mismatch_recorded_and_run_continues(tmp_path: Path) -> None:
@@ -175,9 +181,10 @@ def test_patch_mismatch_recorded_and_run_continues(tmp_path: Path) -> None:
         original = "zzz" if r.file_name == "a.py" else "import sys\n"
         return LLMUnitResponse(fixes=[_fix([r.findings[0].id], original, "")])
 
-    run = analyze(tmp_path, Config(), FakeLLM(handler), [analyzer])
-    assert len(run.errors) == 1
-    assert "patch eşleşmedi" in run.errors[0]
+    run = analyze(tmp_path, Config(verify=False), FakeLLM(handler), [analyzer])
+    assert run.errors == []
+    assert len(run.warnings) == 1
+    assert "patch eşleşmedi" in run.warnings[0]
     by_name = {r.file.name: r for r in run.reports}
     assert by_name["a.py"].suggestions[0].patch is None
     assert by_name["b.py"].suggestions[0].patch is not None
@@ -198,9 +205,73 @@ def test_non_fatal_error_continues(tmp_path: Path) -> None:
     llm = FakeLLM(lambda r: LLMError("model isteği reddetti"))
     run = analyze(tmp_path, Config(), llm, [FakeAnalyzer([_finding(a, 1), _finding(b, 1)])])
     assert len(llm.requests) == 2
-    assert len(run.errors) == 2
+    assert run.errors == []
+    assert len(run.warnings) == 2
 
 
 def test_no_llm_is_static() -> None:
     run = analyze(FIXTURE, Config(), None, [FakeAnalyzer([_finding(FIXTURE, 1)])])
     assert run.reports[0].suggestions == []
+
+
+def _project_file(tmp_path: Path) -> Path:
+    (tmp_path / "pyproject.toml").write_text('[project]\nname = "p"\nversion = "0"\n')
+    calc = tmp_path / "calc.py"
+    calc.write_text("import os\n\n\ndef add(a, b):\n    return a + b\n")
+    return calc
+
+
+def test_failed_verification_hides_suggestion(tmp_path: Path) -> None:
+    calc = _project_file(tmp_path)
+    llm = FakeLLM(
+        lambda r: LLMUnitResponse(
+            fixes=[_fix([r.findings[0].id], "import os\n", "import os(\n")],
+        )
+    )
+    run = analyze(calc, Config(), llm, [FakeAnalyzer([_finding(calc, 1)])])
+    (report,) = run.reports
+    (sug,) = report.suggestions
+    assert sug.verification is not None
+    assert sug.verification.status == VerifyStatus.FAILED
+    assert report.visible_suggestions() == []
+    assert run.errors == []
+    assert calc.read_text().startswith("import os\n")
+
+
+def test_valid_patch_verified_without_tests(tmp_path: Path) -> None:
+    calc = _project_file(tmp_path)
+    llm = FakeLLM(
+        lambda r: LLMUnitResponse(fixes=[_fix([r.findings[0].id], "import os\n", "")]),
+    )
+    run = analyze(calc, Config(), llm, [FakeAnalyzer([_finding(calc, 1)])])
+    (sug,) = run.reports[0].suggestions
+    assert sug.verification is not None
+    assert sug.verification.status == VerifyStatus.PASSED
+    assert "test yok" in sug.verification.detail
+    assert run.warnings == []
+
+
+def test_suggestion_without_patch_keeps_no_verification(tmp_path: Path) -> None:
+    calc = _project_file(tmp_path)
+    llm = FakeLLM(lambda r: LLMUnitResponse(fixes=[_fix([r.findings[0].id])]))
+    run = analyze(calc, Config(), llm, [FakeAnalyzer([_finding(calc, 1)])])
+    assert run.reports[0].suggestions[0].verification is None
+
+
+def test_workspace_failure_is_warning_and_skipped(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calc = _project_file(tmp_path)
+
+    def broken(self: object) -> None:
+        raise OSError("disk dolu")
+
+    monkeypatch.setattr(Workspace, "_populate", broken)
+    llm = FakeLLM(lambda r: LLMUnitResponse(fixes=[_fix([r.findings[0].id], "import os\n", "")]))
+    run = analyze(calc, Config(), llm, [FakeAnalyzer([_finding(calc, 1)])])
+    (sug,) = run.reports[0].suggestions
+    assert sug.verification is not None
+    assert sug.verification.status == VerifyStatus.SKIPPED
+    assert "disk dolu" in sug.verification.detail
+    assert len(run.warnings) == 1
+    assert run.errors == []
