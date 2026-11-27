@@ -3,7 +3,8 @@ from pathlib import Path
 
 import pytest
 from fakes import FakeLLM, ParsedRequest
-from test_profiling import SLOW, make_project
+from test_profiling import SLOW as BASE_SLOW
+from test_profiling import make_project as base_make_project
 from typer.testing import CliRunner
 
 from mytool.cli import main as cli_main
@@ -14,16 +15,25 @@ from mytool.core.models import AnalysisRun, Category, Suggestion, VerifyMethod, 
 from mytool.core.pipeline import NO_PROFILE_DATA, optimize
 
 runner = CliRunner()
-BODY = (
+LOOP = (
     "    total = 0\n    for i in range(n):\n        for j in range(n):\n"
     "            total += i * j\n    return total\n"
 )
+# The sleep keeps the slow/fast gap (~250 ms) far above Windows process-startup
+# noise; with the bare loop alone (~50-100 ms) the speedup check was flaky.
+SLEEP = "    time.sleep(0.25)\n"
+BODY = SLEEP + LOOP
+SLOW = "import time\n\n\n" + BASE_SLOW.replace(LOOP, BODY)
 FAST = "    return (n * (n - 1) // 2) ** 2\n"
 WRONG = "    return (n * (n - 1) // 2) ** 2 + 1\n"
-SLOWER = (
+SLOWER = SLEEP + (
     "    total = 0\n    for _ in range(3):\n        for i in range(n):\n"
     "            for j in range(n):\n                total += i * j\n    return total // 3\n"
 )
+
+
+def make_project(root: Path, source: str = SLOW) -> Path:
+    return base_make_project(root, source)
 
 
 def _llm(replacement: str, original: str = BODY) -> FakeLLM:
