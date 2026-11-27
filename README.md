@@ -52,6 +52,18 @@ mytool translate app.py --to javascript --out app.js
 mytool explain app.py
 ```
 
+## Web arayüzü
+
+`analyze` komutunun yerel web arayüzü de var: klasör seç, ilerlemeyi canlı izle, bulguları ve diff'leri incele, testleri geçen önerileri tek tıkla uygula. Sunucu yalnız `127.0.0.1` üzerinde çalışır ve gerçek çekirdeği (`mytool.core`) kullanır.
+
+```bash
+uv sync --group ui
+cd web && npm ci && npm run build && cd ..
+uv run python -m server        # http://127.0.0.1:8765 açılır
+```
+
+`ANTHROPIC_API_KEY` gerekir. Anahtarsız demo için `MYTOOL_UI_ADAPTER=mock` ile sahte veri gösterilir. Ayrıntılar: `docs/ui.md`.
+
 ## Gizlilik ve güvenlik
 
 **Okumadan kullanma.**

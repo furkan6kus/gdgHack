@@ -1,4 +1,5 @@
-# UI server only (owned by the UI work). The core/CLI packaging lives elsewhere.
+# Lint/type/test settings for the UI server. Dependencies are installed from the
+# repo root (`uv sync --group ui`), because the server imports the `mytool` core.
 [project]
 name = "mytool-ui-server"
 version = "0.1.0"

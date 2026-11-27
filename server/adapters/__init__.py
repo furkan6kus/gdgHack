@@ -10,8 +10,8 @@ from server.adapters.mock import MockAdapter
 
 
 def adapter_from_env() -> Adapter:
-    """Return the adapter named by ``MYTOOL_UI_ADAPTER`` (mock|core, default mock)."""
-    choice = os.environ.get("MYTOOL_UI_ADAPTER", "mock").strip().lower()
+    """Return the adapter named by ``MYTOOL_UI_ADAPTER`` (core|mock, default core)."""
+    choice = os.environ.get("MYTOOL_UI_ADAPTER", "core").strip().lower()
     if choice == "core":
         return CoreAdapter()
     if choice == "mock":

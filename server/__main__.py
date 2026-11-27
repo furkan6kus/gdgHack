@@ -52,9 +52,7 @@ def main() -> None:
 
         from server.app import DEFAULT_DIST, create_app
     except ImportError as err:
-        sys.exit(
-            f"Eksik bağımlılık: {err.name}. Kurulum: pip install fastapi uvicorn 'pydantic>=2.7'"
-        )
+        sys.exit(f"Eksik bağımlılık: {err.name}. Depo kökünde kurulum: uv sync --group ui")
 
     if not _port_is_free(args.port):
         sys.exit(

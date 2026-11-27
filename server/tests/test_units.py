@@ -28,9 +28,9 @@ def test_adapter_env_mock(monkeypatch: pytest.MonkeyPatch) -> None:
     assert isinstance(adapter_from_env(), MockAdapter)
 
 
-def test_adapter_env_default_is_mock(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_adapter_env_default_is_core(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("MYTOOL_UI_ADAPTER", raising=False)
-    assert isinstance(adapter_from_env(), MockAdapter)
+    assert isinstance(adapter_from_env(), CoreAdapter)
 
 
 def test_adapter_env_core(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -7,6 +7,14 @@ final signatures and we adapt the adapter.
 
 Status legend: 🟥 blocking for UI Phase 2 · 🟨 strongly wanted · 🟩 nice to have
 
+> **Status (Phase 2 wired):** §1 progress (`analyze(on_progress=...)`, core
+> `ProgressEvent`/`Stage`), §2 `verify` (`Config.verify`), §3 cancellation
+> (`should_cancel` + `mytool.core.pipeline.Cancelled`) and §4 apply with backup
+> (`mytool.core.apply.apply_suggestions`, with a content hash check) are done.
+> Errors (§5) come back as Turkish strings in `AnalysisRun.errors`, which the
+> adapter maps to `analysis_failed`; stable per-error codes are still open.
+> The rest of this file is kept as the original request list.
+
 ---
 
 ## 1. 🟥 Progress reporting from `core.pipeline` (core cannot print)

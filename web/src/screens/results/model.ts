@@ -50,6 +50,7 @@ export function countByCategory(rows: FindingRow[]): Record<CategoryFilter, numb
   const counts: Record<CategoryFilter, number> = {
     all: 0,
     bug: 0,
+    security: 0,
     perf: 0,
     style: 0,
     shrink: 0,

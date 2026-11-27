@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import re
 from collections import defaultdict
-from collections.abc import Iterator, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from contextlib import ExitStack
 from dataclasses import dataclass
 from itertools import count
@@ -34,8 +34,10 @@ from mytool.core.models import (
     Finding,
     Patch,
     ProfileEntry,
+    ProgressEvent,
     Report,
     Severity,
+    Stage,
     Suggestion,
     UnitExplanation,
     UnitKind,
@@ -76,6 +78,31 @@ SHRINK_MAX_LINE = 100
 NO_PROFILE_DATA = "profil verisi yok: --bench ile bir benchmark betiği ver"
 MAIN_GUARD = re.compile(r"^if\s+__name__\s*==\s*[\"']__main__[\"']\s*:", re.MULTILINE)
 _SEVERITY_ORDER = {Severity.ERROR: 0, Severity.WARNING: 1, Severity.INFO: 2}
+
+
+class Cancelled(Exception):
+    """Raised when `should_cancel` returned True; temp workspaces are already cleaned up."""
+
+
+@dataclass(frozen=True)
+class Progress:
+    """Optional progress sink and cancellation check, polled between units of work."""
+
+    on_progress: Callable[[ProgressEvent], None] | None = None
+    should_cancel: Callable[[], bool] | None = None
+
+    def emit(
+        self, stage: Stage, message: str, current: int | None = None, total: int | None = None
+    ) -> None:
+        if self.should_cancel is not None and self.should_cancel():
+            raise Cancelled
+        if self.on_progress is not None:
+            self.on_progress(
+                ProgressEvent(stage=stage, message=message, current=current, total=total)
+            )
+
+
+_SILENT = Progress()
 
 
 def _candidates(target: Path) -> list[Path]:
@@ -149,23 +176,33 @@ def _with_symbols(path: Path, findings: list[Finding]) -> list[Finding]:
     return result
 
 
+def _hash_files(files: list[Path], progress: Progress) -> dict[Path, str]:
+    hashes: dict[Path, str] = {}
+    for index, path in enumerate(files, start=1):
+        progress.emit(Stage.PARSING, f"{path.name} okunuyor", index, len(files))
+        hashes[path] = hashlib.sha256(path.read_bytes()).hexdigest()
+    return hashes
+
+
 def analyze_static(
-    target: Path, cfg: Config, analyzers: Sequence[Analyzer] | None = None
+    target: Path,
+    cfg: Config,
+    analyzers: Sequence[Analyzer] | None = None,
+    progress: Progress = _SILENT,
 ) -> AnalysisRun:
     files, skipped = collect_files(target, cfg)
+    hashes = _hash_files(files, progress)
+    progress.emit(Stage.STATIC_ANALYSIS, "statik analiz çalıştırılıyor")
     findings, errors = _run_analyzers(
         analyzers if analyzers is not None else [RuffAnalyzer()],
         files,
         float(cfg.subprocess_timeout_s),
     )
+    progress.emit(Stage.STATIC_ANALYSIS, f"{len(findings)} bulgu bulundu")
     kept, hidden = _cap(findings, cfg.max_findings)
     groups = _group_by_file(kept, files)
     reports = [
-        Report(
-            file=p,
-            findings=_with_symbols(p, groups.get(p, [])),
-            content_sha256=hashlib.sha256(p.read_bytes()).hexdigest(),
-        )
+        Report(file=p, findings=_with_symbols(p, groups.get(p, [])), content_sha256=hashes[p])
         for p in files
     ]
     return AnalysisRun(reports=reports, errors=errors, skipped=skipped, truncated=hidden)
@@ -263,12 +300,30 @@ def _handle_group(
             run.warnings.append(error)
 
 
+@dataclass(frozen=True)
+class _Plan:
+    report: Report
+    text_lines: list[str]
+    groups: list[_Group]
+
+
+def _plan(report: Report) -> _Plan:
+    text = report.file.read_text(encoding="utf-8", errors="replace")
+    text_lines = text.splitlines(keepends=True)
+    return _Plan(report, text_lines, _make_groups(report.file, text_lines, report.findings))
+
+
 def _suggest_for_report(
-    run: AnalysisRun, report: Report, llm: LLMClient, ids: Iterator[int]
+    run: AnalysisRun,
+    plan: _Plan,
+    llm: LLMClient,
+    ids: Iterator[int],
+    before_group: Callable[[_Group], None],
 ) -> bool:
     """Returns False when a fatal LLM error means the remaining calls should be skipped."""
-    text_lines = report.file.read_text(encoding="utf-8", errors="replace").splitlines(keepends=True)
-    for group in _make_groups(report.file, text_lines, report.findings):
+    report, text_lines = plan.report, plan.text_lines
+    for group in plan.groups:
+        before_group(group)
         source = "".join(text_lines[group.start - 1 : group.end])
         try:
             _handle_group(run, report, group, source, llm, ids)
@@ -306,20 +361,40 @@ def _verify_one(
         )
 
 
-def _verify_suggestions(run: AnalysisRun, cfg: Config) -> None:
+def _verify_suggestions(run: AnalysisRun, cfg: Config, progress: Progress = _SILENT) -> None:
     skipped = VerificationResult(
         status=VerifyStatus.SKIPPED, method=VerifyMethod.NONE, detail="--no-verify"
     )
+    total = sum(1 for r in run.reports for s in r.suggestions if s.patch is not None)
+    step = count(1)
     workspaces: dict[Path, Workspace] = {}
     with ExitStack() as stack:
         for report in run.reports:
             for index, suggestion in enumerate(report.suggestions):
                 if suggestion.patch is None:
                     continue
+                if cfg.verify:
+                    message = f"{report.file.name}: {suggestion.id} doğrulanıyor"
+                    progress.emit(Stage.VERIFY, message, next(step), total)
                 result = (
                     _verify_one(run, stack, workspaces, cfg, suggestion) if cfg.verify else skipped
                 )
                 report.suggestions[index] = suggestion.model_copy(update={"verification": result})
+
+
+def _suggest_all(run: AnalysisRun, llm: LLMClient, progress: Progress) -> None:
+    plans = [_plan(report) for report in run.reports if report.findings]
+    total = sum(len(plan.groups) for plan in plans)
+    step, ids = count(1), count(1)
+
+    def before_group(group: _Group) -> None:
+        rules = ", ".join(sorted({f.rule for f in group.findings}))
+        where = group.unit_name or f"satır {group.start}-{group.end}"
+        progress.emit(Stage.LLM, f"{where}: {rules} için öneri isteniyor", next(step), total)
+
+    for plan in plans:
+        if not _suggest_for_report(run, plan, llm, ids, before_group):
+            break
 
 
 def analyze(
@@ -327,15 +402,21 @@ def analyze(
     cfg: Config,
     llm: LLMClient | None,
     analyzers: Sequence[Analyzer] | None = None,
+    *,
+    on_progress: Callable[[ProgressEvent], None] | None = None,
+    should_cancel: Callable[[], bool] | None = None,
 ) -> AnalysisRun:
-    run = analyze_static(target, cfg, analyzers)
-    if llm is None:
-        return run
-    ids = count(1)
-    for report in run.reports:
-        if report.findings and not _suggest_for_report(run, report, llm, ids):
-            break
-    _verify_suggestions(run, cfg)
+    """Static analysis, then (with `llm`) suggestions and verification.
+
+    `on_progress` receives ProgressEvents; `should_cancel` is polled between units of
+    work and makes the call raise `Cancelled`.
+    """
+    progress = Progress(on_progress, should_cancel)
+    run = analyze_static(target, cfg, analyzers, progress)
+    if llm is not None:
+        _suggest_all(run, llm, progress)
+        _verify_suggestions(run, cfg, progress)
+    progress.emit(Stage.DONE, "analiz tamamlandı")
     return run
 
 

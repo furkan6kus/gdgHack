@@ -40,6 +40,25 @@ class VerifyMethod(StrEnum):
     NONE = "none"
 
 
+class Stage(StrEnum):
+    PARSING = "parsing"
+    STATIC_ANALYSIS = "static_analysis"
+    LLM = "llm"
+    VERIFY = "verify"
+    DONE = "done"
+
+
+class ProgressEvent(BaseModel):
+    """Progress reported by long-running pipeline calls (frontends render it)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    stage: Stage
+    message: str
+    current: int | None = None
+    total: int | None = None
+
+
 class LineRange(BaseModel):
     model_config = ConfigDict(frozen=True)
 

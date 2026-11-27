@@ -1,11 +1,8 @@
-"""Data contract shared between the UI server and the core.
+"""Data contract between the UI server and the browser (the JSON the UI reads).
 
-TEMPORARY – replace with core.models when available.
-
-These models mirror the mytool spec exactly. Once ``core/models.py`` exists,
-delete this module and re-export from ``core.models`` instead, e.g.::
-
-    from core.models import Finding, Patch, ...  # noqa: F401
+These are deliberately separate from ``mytool.core.models``: the UI wants
+flat, JSON-friendly shapes (relative paths, ``rule_code``, millisecond
+durations). ``server.adapters.core_adapter`` converts core models into these.
 """
 
 from __future__ import annotations
@@ -16,7 +13,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 Severity = Literal["error", "warning", "info"]
-Category = Literal["bug", "perf", "style", "shrink", "translate"]
+Category = Literal["bug", "security", "perf", "style", "shrink", "translate"]
 VerificationStatus = Literal["passed", "failed", "skipped"]
 Stage = Literal["parsing", "static_analysis", "llm", "verify", "done", "error"]
 

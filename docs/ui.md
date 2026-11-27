@@ -14,21 +14,22 @@ network. A Tauri desktop wrapper is planned for later.
 
 ## 3. Setup
 
-Dependencies are declared in `server/pyproject.toml`. `server/` is not an
-installable package, so install the dependencies directly:
+The server imports the `mytool` core, so everything is installed from the repo
+root into one virtualenv (the `ui` dependency group adds FastAPI and uvicorn):
 
 ```bash
-python -m venv .venv
-.venv/bin/pip install fastapi uvicorn "pydantic>=2.7"
-.venv/bin/pip install pytest httpx ruff mypy      # dev tools
+uv sync --group ui
 cd web && npm ci
 ```
+
+Set `ANTHROPIC_API_KEY` before starting the server; the UI uses the real core
+by default and refuses to analyze without a key.
 
 ## 4. Dev mode (two terminals)
 
 ```bash
 # terminal 1, from the repo root (port 8765)
-python -m server --no-browser
+uv run python -m server --no-browser
 
 # terminal 2
 cd web && npm run dev
@@ -42,7 +43,7 @@ missing, the backend serves the API only.
 
 ```bash
 cd web && npm run build
-cd .. && python -m server
+cd .. && uv run python -m server
 ```
 
 Opens http://127.0.0.1:8765 (API and built frontend from one process). The
@@ -56,11 +57,12 @@ the page explains how to build it. Use `--port` if 8765 is taken.
 
 | Variable | Values | Meaning |
 |---|---|---|
-| `MYTOOL_UI_ADAPTER` | `mock` (default), `core` | Which adapter backs the API |
+| `MYTOOL_UI_ADAPTER` | `core` (default), `mock` | Which adapter backs the API (`mock` = fake data, no API key needed) |
+| `MYTOOL_MODEL` | model name | Core adapter: model used for suggestions (default `claude-sonnet-5-5`) |
 | `MYTOOL_UI_MOCK_SCENARIO` | `ok`, `empty`, `error`, `no_key` | Mock behaviour for demos |
 | `MYTOOL_UI_MOCK_DELAY` | number | Delay multiplier for the mock (`0` = instant) |
 | `MYTOOL_UI_DIST` | path | Override the built frontend directory |
-| `ANTHROPIC_API_KEY` | string | Core adapter only. Only its presence is checked; the value is never sent to the UI |
+| `ANTHROPIC_API_KEY` | string | Core adapter: required. Only its presence is reported; the value is never sent to the UI |
 
 ## 7. Architecture
 
@@ -77,10 +79,11 @@ FastAPI (server/)
         v
 Adapter protocol (server/adapters/base.py)
    |                         |
-MockAdapter              CoreAdapter
+MockAdapter              CoreAdapter  (core models -> UI contract)
 (fake data)                  |
                              v
-                        core.pipeline (teammates)
+              mytool.core.pipeline.analyze(on_progress, should_cancel)
+              mytool.core.apply.apply_suggestions
 ```
 
 - The adapter runs in a worker thread and reports progress through a
@@ -91,8 +94,16 @@ MockAdapter              CoreAdapter
   reach the UI.
 - `/api/apply` accepts only suggestions with `verification.status == "passed"`;
   a request containing anything else is rejected as a whole.
-- The data contracts in `server/contracts.py` are TEMPORARY until
-  `core/models.py` exists.
+- `server/contracts.py` is the JSON the browser reads. It stays separate from
+  `mytool.core.models` on purpose; `CoreAdapter` converts between them.
+- Verification mapping: only a test-backed pass (`pytest`/benchmark) is shown
+  as `passed` and can be applied from the UI. A syntax-only check (project has
+  no tests, tests fail on the baseline, project too large) is shown as
+  `skipped` with "Doğrulanamadı: yalnız sözdizimi denetlendi", the same rule as
+  the CLI's `--fix`.
+- `CoreAdapter` keeps the last 20 core runs in memory so `apply` can hand the
+  core its own reports; a file edited after the analysis is refused
+  (`apply_failed`) instead of being patched blindly.
 
 ## 8. API
 
@@ -110,7 +121,8 @@ Errors always have the body `{"code": "...", "message": "..."}`. Common codes:
 `path_not_found` (404), `path_denied` (403),
 `invalid_request` (422), `unsupported_media_type` (415), `job_not_found` (404),
 `job_not_finished` (409), `unknown_suggestion`, `not_verified`,
-`already_applied` (409), `api_key_missing`, `analyzer_failed`, `cancelled`.
+`already_applied` (409), `api_key_missing`, `analysis_failed` (500), `apply_failed` (409),
+`cancelled`. (`analyzer_failed` is only produced by the mock.)
 
 ## 9. Security notes
 
@@ -124,21 +136,27 @@ Errors always have the body `{"code": "...", "message": "..."}`. Common codes:
   `.pypirc`, `credentials*`, `secrets*`, `.ssh`, `.gnupg`, `.aws`, `.docker`, `.kube`.
 - Stack traces are logged on the server and never sent to the UI.
 
-## 10. Switching from mock to core adapter (Phase 2)
+## 10. Core adapter (Phase 2, done)
 
-1. Implement `CoreAdapter` in `server/adapters/core_adapter.py` by calling `core.pipeline`.
-2. Replace `server/contracts.py` with re-exports from `core.models`.
-3. Run with `MYTOOL_UI_ADAPTER=core` (and `ANTHROPIC_API_KEY` set).
+The UI runs on the real core by default. `CoreAdapter` calls
+`mytool.core.pipeline.analyze(..., on_progress=..., should_cancel=...)`, maps
+`Cancelled` to the `cancelled` state and any run error (ruff failure, fatal
+LLM error such as an invalid key or rate limit) to `analysis_failed` with the
+core's Turkish message. Non-fatal warnings are logged on the server.
 
-See `docs/ui-core-requests.md` for what the UI needs from the core.
+Cancellation is checked between units of work (per file, per LLM call, per
+verification); a test run already in progress finishes (bounded by the
+subprocess timeout) before the job stops.
+
+For demos without an API key: `MYTOOL_UI_ADAPTER=mock`.
 
 ## 11. Quality checks
 
 ```bash
 # from server/
-../.venv/bin/ruff check . && ../.venv/bin/ruff format --check .
-../.venv/bin/mypy .
-../.venv/bin/python -m pytest
+uv run ruff check . && uv run ruff format --check .
+uv run mypy .
+uv run python -m pytest
 
 # from web/
 npm run lint && npm run typecheck && npm run build

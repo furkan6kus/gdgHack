@@ -21,12 +21,14 @@ export const STAGE_LABELS: Record<Stage, string> = {
 // Filter chips shown for analyze. shrink/translate belong to other commands.
 export const CATEGORY_CHIPS: { value: Category; label: string }[] = [
   { value: 'bug', label: 'HATA' },
+  { value: 'security', label: 'GÜVENLİK' },
   { value: 'perf', label: 'PERF' },
   { value: 'style', label: 'STİL' },
 ];
 
 export const CATEGORY_LABELS: Record<Category, string> = {
   bug: 'HATA',
+  security: 'GÜVENLİK',
   perf: 'PERF',
   style: 'STİL',
   shrink: 'KÜÇÜLTME',

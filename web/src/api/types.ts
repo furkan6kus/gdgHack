@@ -2,7 +2,7 @@
 // Keep in sync with the backend contract; this is the ONLY place these shapes live.
 
 export type Severity = 'error' | 'warning' | 'info';
-export type Category = 'bug' | 'perf' | 'style' | 'shrink' | 'translate';
+export type Category = 'bug' | 'security' | 'perf' | 'style' | 'shrink' | 'translate';
 export type VerificationStatus = 'passed' | 'failed' | 'skipped';
 export type Stage = 'parsing' | 'static_analysis' | 'llm' | 'verify' | 'done' | 'error';
 
