@@ -11,14 +11,14 @@ function defineTheme(monaco: Monaco): void {
     inherit: true,
     rules: [],
     colors: {
-      'editor.background': '#0b0b10',
-      'editorGutter.background': '#0b0b10',
+      'editor.background': '#0b0f17',
+      'editorGutter.background': '#0b0f17',
       'editor.lineHighlightBackground': '#ffffff00',
-      'diffEditor.insertedTextBackground': '#3ecf8e22',
-      'diffEditor.removedTextBackground': '#f0554d22',
-      'diffEditor.insertedLineBackground': '#3ecf8e12',
-      'diffEditor.removedLineBackground': '#f0554d12',
-      'editorLineNumber.foreground': '#4a4a58',
+      'diffEditor.insertedTextBackground': '#10b98126',
+      'diffEditor.removedTextBackground': '#f0645a26',
+      'diffEditor.insertedLineBackground': '#10b98112',
+      'diffEditor.removedLineBackground': '#f0645a12',
+      'editorLineNumber.foreground': '#475569',
     },
   });
 }

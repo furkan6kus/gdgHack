@@ -178,11 +178,11 @@ def select_applicable(job: Job, suggestion_ids: list[str]) -> list[Suggestion]:
 
 MISSING_BUILD_PAGE = """<!doctype html>
 <html lang="tr"><head><meta charset="utf-8"><title>mytool</title>
-<style>body{background:#0b0b10;color:#e8e8ee;font:15px/1.6 system-ui,sans-serif;
+<style>body{background:#0b0f17;color:#e2e8f0;font:15px/1.6 system-ui,sans-serif;
 display:grid;place-items:center;height:100vh;margin:0}main{max-width:560px;padding:24px}
-code,pre{font-family:ui-monospace,Menlo,Consolas,monospace;background:#1a1a24;
-border:1px solid #272733;border-radius:6px}code{padding:1px 5px}pre{padding:12px}
-h1{font-size:18px}p{color:#8b8b9a}</style></head><body><main>
+code,pre{font-family:ui-monospace,Menlo,Consolas,monospace;background:#131822;
+border:1px solid #1f2937;border-radius:10px}code{padding:1px 5px}pre{padding:12px}
+h1{font-size:18px}p{color:#94a3b8}</style></head><body><main>
 <h1>Arayüz henüz derlenmemiş</h1>
 <p>Sunucu çalışıyor ama <code>web/dist</code> bulunamadı. Bir kez derleyip sunucuyu
 yeniden başlatın:</p>

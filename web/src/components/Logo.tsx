@@ -10,7 +10,7 @@ export function LogoMark({ size = 40, animate = false }: { size?: number; animat
       <rect x="1" y="1" width="46" height="46" rx="12" fill="url(#logo-bg)" stroke="#ffffff14" />
       <motion.path
         d="M17 14h-4v20h4M31 14h4v20h-4"
-        stroke="#e8e8ee"
+        stroke="#e2e8f0"
         strokeWidth="2.5"
         strokeLinecap="round"
         strokeLinejoin="round"
@@ -28,8 +28,8 @@ export function LogoMark({ size = 40, animate = false }: { size?: number; animat
       />
       <defs>
         <linearGradient id="logo-bg" x1="0" y1="0" x2="48" y2="48">
-          <stop stopColor="#1f1d33" />
-          <stop offset="1" stopColor="#121220" />
+          <stop stopColor="#1a2130" />
+          <stop offset="1" stopColor="#131822" />
         </linearGradient>
       </defs>
     </svg>
